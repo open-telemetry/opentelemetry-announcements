@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/open-telemetry/opentelemetry-announcements/schema/announcement.schema.json",
+  "title": "OpenTelemetry announcement",
+  "description": "One announcement: a first post that is sent when the pull request is merged, and optional follow-ups that are scheduled in Buffer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text"],
+  "properties": {
+    "text": {
+      "$ref": "#/$defs/text",
+      "description": "Default text of the first post, used for every channel without its own text. Plain text; write links inline."
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^\\n]+$",
+      "description": "Subject of the mailing list email. Required when the mailing list (groupsio) is one of the channels."
+    },
+    "channels": {
+      "type": "array",
+      "description": "Channels for the first post. Defaults to all channels.",
+      "items": { "$ref": "#/$defs/channel" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "image": { "$ref": "#/$defs/image" },
+    "alt": { "$ref": "#/$defs/alt" },
+    "bluesky": { "$ref": "#/$defs/text", "description": "Text of the first post on Bluesky." },
+    "mastodon": { "$ref": "#/$defs/text", "description": "Text of the first post on Mastodon." },
+    "linkedin": { "$ref": "#/$defs/text", "description": "Text of the first post on LinkedIn." },
+    "slack": { "$ref": "#/$defs/text", "description": "Text of the first post on Slack." },
+    "groupsio": { "$ref": "#/$defs/text", "description": "Body of the mailing list email." },
+    "follow_ups": {
+      "type": "array",
+      "description": "Posts scheduled in Buffer when the pull request is merged. Only Bluesky, Mastodon and LinkedIn support scheduling.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/followUp" }
+    }
+  },
+  "dependentRequired": {
+    "image": ["alt"],
+    "alt": ["image"]
+  },
+  "allOf": [
+    {
+      "description": "The mailing list needs a subject. It is selected when channels is omitted or lists groupsio.",
+      "if": {
+        "anyOf": [
+          { "not": { "required": ["channels"] } },
+          {
+            "required": ["channels"],
+            "properties": { "channels": { "contains": { "const": "groupsio" } } }
+          }
+        ]
+      },
+      "then": { "required": ["subject"] }
+    },
+    { "$ref": "#/$defs/overrideNeedsChannel/bluesky" },
+    { "$ref": "#/$defs/overrideNeedsChannel/mastodon" },
+    { "$ref": "#/$defs/overrideNeedsChannel/linkedin" },
+    { "$ref": "#/$defs/overrideNeedsChannel/slack" },
+    { "$ref": "#/$defs/overrideNeedsChannel/groupsio" }
+  ],
+  "$defs": {
+    "channel": {
+      "enum": ["bluesky", "mastodon", "linkedin", "slack", "groupsio"]
+    },
+    "scheduledChannel": {
+      "enum": ["bluesky", "mastodon", "linkedin"]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "image": {
+      "type": "string",
+      "description": "Image file next to the announcement, as a relative path (for example otel-in-practice.png).",
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*\\.(png|jpe?g|gif|webp)$"
+    },
+    "alt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "description": "Alternative text for the image. Required when image is set."
+    },
+    "followUp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publish_at", "text"],
+      "properties": {
+        "publish_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:\\d{2})$",
+          "description": "When Buffer publishes the post, in ISO 8601 with a time zone, for example 2026-11-05T16:00:00Z."
+        },
+        "text": { "$ref": "#/$defs/text" },
+        "channels": {
+          "type": "array",
+          "description": "Channels for this follow-up. Defaults to bluesky, mastodon and linkedin.",
+          "items": { "$ref": "#/$defs/scheduledChannel" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "image": { "$ref": "#/$defs/image" },
+        "alt": { "$ref": "#/$defs/alt" },
+        "bluesky": { "$ref": "#/$defs/text" },
+        "mastodon": { "$ref": "#/$defs/text" },
+        "linkedin": { "$ref": "#/$defs/text" }
+      },
+      "dependentRequired": {
+        "image": ["alt"],
+        "alt": ["image"]
+      },
+      "allOf": [
+        { "$ref": "#/$defs/overrideNeedsChannel/bluesky" },
+        { "$ref": "#/$defs/overrideNeedsChannel/mastodon" },
+        { "$ref": "#/$defs/overrideNeedsChannel/linkedin" }
+      ]
+    },
+    "overrideNeedsChannel": {
+      "bluesky": {
+        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "bluesky" } } } } },
+        "then": { "not": { "required": ["bluesky"] } }
+      },
+      "mastodon": {
+        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "mastodon" } } } } },
+        "then": { "not": { "required": ["mastodon"] } }
+      },
+      "linkedin": {
+        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "linkedin" } } } } },
+        "then": { "not": { "required": ["linkedin"] } }
+      },
+      "slack": {
+        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "slack" } } } } },
+        "then": { "not": { "required": ["slack"] } }
+      },
+      "groupsio": {
+        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "groupsio" } } } } },
+        "then": { "not": { "required": ["groupsio"] } }
+      }
+    }
+  }
+}

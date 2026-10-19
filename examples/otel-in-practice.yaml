@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=../schema/announcement.schema.json
+#
+# Example: an OTel in Practice session with two reminders.
+# Copy this file to announcements/<year>/<name>.yaml and adjust it.
+
+image: otel-in-practice.png
+alt: OTel in Practice with Diana Todea, October 13, 9 AM PDT
+
+# First post: sent to all channels when the pull request is merged.
+subject: "OTel in Practice: Contributing without writing code"
+text: |
+  "I'm not a developer, so I can't contribute to open source." If you've ever
+  thought that about OpenTelemetry, our next OTel in Practice is for you.
+
+  Diana Todea (Localization SIG Maintainer and 2025 OTel Community Award
+  winner) shows what localization work looks like and how to get started.
+
+  📅 Oct 13 | 9 AM PDT
+  🔗 https://opentelemetry.io/community/otel-in-practice/
+bluesky: |
+  "I'm not a developer, so I can't contribute to open source." Ever thought
+  that about OpenTelemetry? Diana Todea (Localization SIG) shows there's more
+  to contributing than code.
+
+  📅 Oct 13 | 9 AM PDT
+  🔗 https://opentelemetry.io/community/otel-in-practice/
+groupsio: |
+  Hello everyone,
+
+  Join us for the next OTel in Practice on October 13 at 9 AM PDT. Diana Todea
+  (Localization SIG Maintainer) shows what localization work looks like and
+  how to get started contributing without writing code.
+
+  Register: https://opentelemetry.io/community/otel-in-practice/
+
+# Follow-ups: scheduled in Buffer when the pull request is merged.
+follow_ups:
+  - publish_at: "2026-10-12T16:00:00Z"
+    text: |
+      Tomorrow, we'll be talking about how to contribute to OpenTelemetry
+      without writing a single line of code, with Diana Todea.
+
+      📅 Oct 13 | 9 AM PDT
+      🔗 https://opentelemetry.io/community/otel-in-practice/
+
+  - publish_at: "2026-10-13T15:00:00Z"
+    channels: [bluesky, mastodon]
+    text: |
+      ⏰ In 1 hour: Diana Todea on contributing to OpenTelemetry beyond code.
+      🔗 https://opentelemetry.io/community/otel-in-practice/
