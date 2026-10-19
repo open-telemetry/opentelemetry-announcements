@@ -1,11 +1,11 @@
 # OpenTelemetry Announcements
 
 This repository is the central place for announcements on the OpenTelemetry
-social media channels, such as [Bluesky], [Mastodon], LinkedIn, the
-[announcements mailing list] and Slack.
+social media channels, such as [Bluesky][], [Mastodon][], LinkedIn, the
+[announcements mailing list][] and Slack.
 
 Anyone can open an issue or pull request to ask for an announcement. Before you
-do, read the [Social Media Guide] and the [Marketing Guidelines].
+do, read the [Social Media Guide][] and the [Marketing Guidelines][].
 
 ## Maintainers
 
