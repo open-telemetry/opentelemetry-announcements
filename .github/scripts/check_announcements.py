@@ -161,7 +161,13 @@ def posts(data):
 
 
 def counted_length(text):
-    return len(URL_PATTERN.sub("x" * LINK_LENGTH, text.strip()))
+    def link(match):
+        # Punctuation right after a link, like a full stop, isn't part of the
+        # link but still counts.
+        url = match.group().rstrip(URL_TRAILING)
+        return "x" * LINK_LENGTH + match.group()[len(url):]
+
+    return len(URL_PATTERN.sub(link, text.strip()))
 
 
 def check_lengths(path, data, report):
@@ -214,10 +220,12 @@ def link_status(url):
     """Return None if the URL works, otherwise a short description."""
     headers = {"User-Agent": "opentelemetry-announcements-check"}
     for method in ("HEAD", "GET"):
-        request = urllib.request.Request(url, method=method, headers=headers)
         try:
+            request = urllib.request.Request(url, method=method, headers=headers)
             with urllib.request.urlopen(request, timeout=LINK_TIMEOUT):
                 return None
+        except ValueError:
+            return "is not a valid URL"
         except urllib.error.HTTPError as exc:
             if method == "HEAD" and exc.code in (403, 405, 501):
                 continue  # some servers don't answer HEAD
