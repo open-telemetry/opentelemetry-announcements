@@ -28,7 +28,7 @@ Every pull request is checked automatically:
 | Check | Applies to | Level |
 | ----- | ---------- | ----- |
 | Structure against the schema | all files | error |
-| Length per channel (Bluesky 300, Mastodon 500, LinkedIn 3,000, Slack 40,000; links count as 23 characters) | all files | error |
+| Length per channel as Buffer counts it: Bluesky 300 (links count as their host plus up to 16 characters), Mastodon 500 (links count as 23, most emoji as 2), LinkedIn 3,000 (links count as 24, most emoji as 2), Slack 40,000 | all files | error |
 | Image file exists | all files | error |
 | `publish_at` is in the future | announcements added or changed in the pull request | error |
 | Links are reachable | announcements added or changed in the pull request | warning |

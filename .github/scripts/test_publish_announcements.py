@@ -96,6 +96,47 @@ def buffer_post(status="sending", post_id="post-id"):
     return {"data": {"createPost": {"post": {"id": post_id, "status": status}}}}
 
 
+class LengthTests(TestCase):
+    LONG_URL = "https://opentelemetry.io/" + "a" * 75  # 100 characters
+
+    def errors(self, content):
+        report = check.Reporter()
+        path = self.files.write(content)
+        check.check_lengths(path, check.load_yaml(path), report)
+        return report.errors
+
+    def test_links_count_per_channel(self):
+        url = self.LONG_URL
+        self.assertEqual(check.counted_length(url, "mastodon"), 23)
+        self.assertEqual(check.counted_length(url, "linkedin"), 24)
+        self.assertEqual(check.counted_length(url, "bluesky"), len("opentelemetry.io") + 16)
+        self.assertEqual(check.counted_length(url, "slack"), 100)
+
+    def test_bluesky_short_links_count_in_full_without_scheme(self):
+        self.assertEqual(check.counted_length("https://opentelemetry.io/", "bluesky"), 16)
+        self.assertEqual(check.counted_length("https://opentelemetry.io/blog/", "bluesky"), 22)
+
+    def test_punctuation_after_a_link_counts(self):
+        text = "a" * 476 + " https://example.com."
+        self.assertEqual(check.counted_length(text, "mastodon"), 501)
+
+    def test_emoji_count_as_utf16_on_mastodon_and_linkedin(self):
+        self.assertEqual(check.counted_length("🚀", "mastodon"), 2)
+        self.assertEqual(check.counted_length("🚀", "linkedin"), 2)
+        self.assertEqual(check.counted_length("🚀", "bluesky"), 1)
+
+    def test_long_bluesky_link_is_not_counted_as_23(self):
+        # 276 letters, a space and the link: 277 + 32 = 309 on Bluesky.
+        self.assertEqual(
+            self.errors(f"channels: [bluesky]\ntext: {'a' * 276} {self.LONG_URL}\n"), 1)
+        self.assertEqual(
+            self.errors(f"channels: [bluesky]\ntext: {'a' * 267} {self.LONG_URL}\n"), 0)
+
+    def test_mastodon_limit_with_emoji(self):
+        self.assertEqual(self.errors(f"channels: [mastodon]\ntext: {'🚀' * 251}\n"), 1)
+        self.assertEqual(self.errors(f"channels: [mastodon]\ntext: {'🚀' * 250}\n"), 0)
+
+
 class PlanTests(TestCase):
     def test_posts_channels_and_destinations(self):
         items = self.plan()

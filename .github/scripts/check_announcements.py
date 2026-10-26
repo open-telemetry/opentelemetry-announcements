@@ -26,6 +26,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator, FormatChecker
 from ruamel.yaml import YAML
@@ -39,11 +40,21 @@ SEARCH_DIRS = ("announcements", "examples")
 
 CHANNELS = ["bluesky", "mastodon", "linkedin", "slack", "groupsio"]
 SCHEDULED_CHANNELS = ["bluesky", "mastodon", "linkedin"]
-# Character limits per post. Bluesky counts graphemes and Mastodon counts every
-# link as 23 characters; counting code points with links as 23 is close to both
-# and slightly stricter for emoji sequences.
+# Character limits per post, counted the way Buffer validates them
+# (https://developers.buffer.com/guides/character-limits.md). Mastodon and
+# LinkedIn count UTF-16 code units, so most emoji count as 2, and every link as
+# 23 and 24. Bluesky counts graphemes and shortens links to their host plus at
+# most 16 characters; counting code points is slightly stricter for emoji
+# sequences. Slack counts links in full.
 LIMITS = {"bluesky": 300, "mastodon": 500, "linkedin": 3000, "slack": 40000}
-LINK_LENGTH = 23
+LINK_LENGTHS = {"mastodon": 23, "linkedin": 24}
+UTF16_CHANNELS = {"mastodon", "linkedin"}
+LINK_RULES = {
+    "bluesky": "links count as their host plus up to 16 characters",
+    "mastodon": "links count as 23 and most emoji as 2",
+    "linkedin": "links count as 24 and most emoji as 2",
+    "slack": "links count in full",
+}
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+")
 URL_TRAILING = ".,;:!?)]}'\""
 LINK_TIMEOUT = 15
@@ -160,14 +171,34 @@ def posts(data):
         yield ["follow_ups", index], follow_up, follow_up.get("channels", SCHEDULED_CHANNELS)
 
 
-def counted_length(text):
+def link_length(url, channel):
+    if channel in LINK_LENGTHS:
+        return LINK_LENGTHS[channel]
+    if channel == "bluesky":
+        # Like toShortUrl in Bluesky's app: the host, then the rest of the link
+        # cut to 13 characters and "..." if it is longer than 15.
+        try:
+            parts = urlsplit(url)
+            rest = ("" if parts.path == "/" else parts.path) \
+                + (f"?{parts.query}" if parts.query else "") \
+                + (f"#{parts.fragment}" if parts.fragment else "")
+            return len(parts.netloc) + (16 if len(rest) > 15 else len(rest))
+        except ValueError:
+            pass
+    return len(url)
+
+
+def counted_length(text, channel):
     def link(match):
         # Punctuation right after a link, like a full stop, isn't part of the
         # link but still counts.
         url = match.group().rstrip(URL_TRAILING)
-        return "x" * LINK_LENGTH + match.group()[len(url):]
+        return "x" * link_length(url, channel) + match.group()[len(url):]
 
-    return len(URL_PATTERN.sub(link, text.strip()))
+    text = URL_PATTERN.sub(link, text.strip())
+    if channel in UTF16_CHANNELS:
+        return len(text.encode("utf-16-le")) // 2
+    return len(text)
 
 
 def check_lengths(path, data, report):
@@ -176,11 +207,11 @@ def check_lengths(path, data, report):
             if channel not in LIMITS:
                 continue
             key = channel if channel in post else "text"
-            length = counted_length(post[key])
+            length = counted_length(post[key], channel)
             if length > LIMITS[channel]:
                 report(path, line_of(data, post_path + [key]),
                        f"{location(post_path + [key])}: {channel} post is {length} characters "
-                       f"(links count as {LINK_LENGTH}); the limit is {LIMITS[channel]}")
+                       f"({LINK_RULES[channel]}); the limit is {LIMITS[channel]}")
 
 
 def check_images(path, data, report):

@@ -27,9 +27,12 @@ on:
 permissions: {}
 
 # Never run two deliveries at the same time, and never cancel one halfway.
+# Queue the waiting runs instead of keeping only the latest one: each push
+# delivers only its own announcements, so a replaced run would lose them.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max
 
 env:
   # Until the delivery paths are verified, pushes create drafts. Set the
