@@ -37,3 +37,6 @@ jobs:
           # In pull requests, new and changed announcements also get their
           # publish_at times and links checked.
           python .github/scripts/check_announcements.py ${BASE_SHA:+--base "$BASE_SHA"}
+
+      - name: Test scripts
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py'

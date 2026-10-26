@@ -1,0 +1,124 @@
+name: Publish announcements
+
+# Publishes announcement files added to main. Manual runs publish the given
+# files again, so check the report of earlier runs first to avoid duplicates.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - announcements/**
+  workflow_dispatch:
+    inputs:
+      files:
+        description: Announcement files, separated by spaces (for example announcements/2026/kubecon.yaml)
+        required: true
+        type: string
+      mode:
+        description: check (preview only), draft (drafts in Buffer and Groups.io) or publish
+        required: true
+        type: choice
+        options:
+          - check
+          - draft
+          - publish
+        default: check
+
+permissions: {}
+
+# Never run two deliveries at the same time, and never cancel one halfway.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  # Until the delivery paths are verified, pushes create drafts. Set the
+  # ANNOUNCEMENT_MODE variable to publish to send announcements directly.
+  MODE: ${{ inputs.mode || vars.ANNOUNCEMENT_MODE || 'draft' }}
+
+jobs:
+  # Runs without the environment or secrets, so the announcements are checked
+  # and previewed in the job summary before anyone is asked to approve.
+  check:
+    name: Check announcements
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # for actions/checkout
+    outputs:
+      count: ${{ steps.check.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # to find the announcements added by the push
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: pip install --require-hashes --no-deps -r .github/requirements.txt
+
+      - name: Check and preview
+        id: check
+        env:
+          ANNOUNCEMENT_TARGETS: ${{ vars.ANNOUNCEMENT_TARGETS }}
+          BEFORE: ${{ github.event.before }}
+          FILES: ${{ inputs.files }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            read -ra args <<< "$FILES"
+          else
+            args=(--since "$BEFORE")
+          fi
+          python .github/scripts/publish_announcements.py --check-only --mode "$MODE" "${args[@]}"
+
+  deliver:
+    name: Deliver announcements
+    needs: check
+    if: ${{ needs.check.outputs.count != '0' && (inputs.mode || vars.ANNOUNCEMENT_MODE || 'draft') != 'check' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Configure required reviewers on this environment; it holds the secrets.
+    environment: announcements
+    permissions:
+      contents: read # for actions/checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # to find the announcements added by the push
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: pip install --require-hashes --no-deps -r .github/requirements.txt
+
+      - name: Deliver
+        env:
+          ANNOUNCEMENT_TARGETS: ${{ vars.ANNOUNCEMENT_TARGETS }}
+          BEFORE: ${{ github.event.before }}
+          FILES: ${{ inputs.files }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GROUPSIO_API_KEY: ${{ secrets.GROUPSIO_API_KEY }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            read -ra args <<< "$FILES"
+          else
+            args=(--since "$BEFORE")
+          fi
+          python .github/scripts/publish_announcements.py --mode "$MODE" \
+            --report "$RUNNER_TEMP/announcements" "${args[@]}"
+
+      - name: Upload report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: announcements-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/announcements/report.json
+          if-no-files-found: error
+          retention-days: 90

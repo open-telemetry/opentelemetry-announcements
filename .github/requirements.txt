@@ -1,4 +1,4 @@
-# Tools for .github/scripts/check_announcements.py.
+# Tools for the scripts in .github/scripts.
 # Regenerate with: printf 'jsonschema==<version>\nruamel.yaml==<version>\n' | pip-compile --generate-hashes --no-header --strip-extras - -o .github/requirements.txt
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \
