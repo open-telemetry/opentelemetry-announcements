@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../schema/announcement.schema.json
 #
 # Example: an OTel in Practice session with two reminders.
-# Copy this file to announcements/<year>/<name>.yaml and adjust it.
+# Copy this file to announcements/<year>/<MM-DD>-<name>.yaml and adjust it.
 
 image: otel-in-practice.png
 alt: OTel in Practice with Diana Todea, October 13, 9 AM PDT
