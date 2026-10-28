@@ -1,0 +1,42 @@
+name: Check announcements
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check announcements
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # for actions/checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # to find the announcements changed by a pull request
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: pip install --require-hashes --no-deps -r .github/requirements.txt
+
+      - name: Check announcements
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # In pull requests, new and changed announcements also get their
+          # publish_at times and links checked.
+          python .github/scripts/check_announcements.py ${BASE_SHA:+--base "$BASE_SHA"}
+
+      - name: Test scripts
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py'

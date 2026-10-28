@@ -1,0 +1,8 @@
+{
+  "yaml.schemas": {
+    "./schema/announcement.schema.json": [
+      "announcements/**/*.yaml",
+      "examples/**/*.yaml"
+    ]
+  }
+}
