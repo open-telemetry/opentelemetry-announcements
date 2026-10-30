@@ -5,8 +5,10 @@ Usage: check_announcements.py [--base REF] [FILE ...]
 
 Without FILE arguments, checks announcements/**/*.yaml and examples/**/*.yaml.
 
-Every file is checked against schema/announcement.schema.json, against the
-channels' length limits, and for missing image files. Files that are new or
+config.yaml is checked against schema/config.schema.json. Every file is
+checked against schema/announcement.schema.json, against the channels' length
+limits, for missing image files, and for skipped destinations that are not in
+config.yaml. Files that are new or
 changed are also checked for publish_at times in the past (error) and for
 links that don't return 200 (warning). A file counts as new or changed when it
 is passed as an argument, or when it differs from REF (with --base). Files in
@@ -36,6 +38,8 @@ from ruamel.yaml.scalarstring import FoldedScalarString, LiteralScalarString
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "schema" / "announcement.schema.json"
+CONFIG = ROOT / "config.yaml"
+CONFIG_SCHEMA = ROOT / "schema" / "config.schema.json"
 SEARCH_DIRS = ("announcements", "examples")
 
 CHANNELS = ["bluesky", "mastodon", "linkedin", "slack", "groupsio"]
@@ -139,12 +143,16 @@ def describe(error):
         ]
     if error.validator == "not" and "required" in error.validator_value:
         key = error.validator_value["required"][0]
-        return [(path + [key], f"'{key}' text is set, but {key} is not in channels")]
+        return [(path + [key], f"'{key}' text is set, but {key} is skipped")]
     if error.validator == "required":
         return [(path, error.message.replace("is a required property", "is required"))]
     if error.validator in ("pattern", "format") and path and path[-1] == "publish_at":
         return [(path, f"'{error.instance}' is not a date and time with a time zone, "
                        "for example 2026-11-05T16:00:00Z")]
+    if error.validator in ("pattern", "not") and len(path) > 1 and path[-2] == "skip":
+        channels = SCHEDULED_CHANNELS if "follow_ups" in path else CHANNELS
+        return [(path, f"'{error.instance}' must be a channel ({', '.join(channels)}) or "
+                       "a channel and destination from config.yaml, for example slack/opentelemetry")]
     if error.validator == "pattern" and path and path[-1] == "image":
         return [(path, f"'{error.instance}' must be a relative path to a "
                        ".png, .jpg, .gif or .webp file next to the announcement")]
@@ -165,10 +173,77 @@ def check_schema(path, data, validator, report):
 
 
 def posts(data):
-    """Yield (path, post, channels) for the first post and each follow-up."""
-    yield [], data, data.get("channels", CHANNELS)
+    """Yield (path, post, channels) for the first post and each follow-up.
+
+    channels are the channels that the post is not skipping as a whole.
+    """
+    yield [], data, [c for c in CHANNELS if c not in data.get("skip", [])]
     for index, follow_up in enumerate(data.get("follow_ups", [])):
-        yield ["follow_ups", index], follow_up, follow_up.get("channels", SCHEDULED_CHANNELS)
+        skip = follow_up.get("skip", [])
+        yield ["follow_ups", index], follow_up, [c for c in SCHEDULED_CHANNELS if c not in skip]
+
+
+def destinations(post, channels, targets):
+    """Yield (channel, name, target) for every destination the post is sent to."""
+    skip = post.get("skip", [])
+    for channel in channels:
+        for name, target in targets.get(channel, {}).items():
+            if f"{channel}/{name}" not in skip:
+                yield channel, name, target
+
+
+def load_config(report, path=None):
+    """Load config.yaml and check it; return None if it has errors."""
+    path = path or CONFIG
+    errors = report.errors
+    try:
+        config = load_yaml(path)
+    except FileNotFoundError:
+        report(path, 1, "configuration file not found")
+        return None
+    except MarkedYAMLError as exc:
+        mark = exc.problem_mark or exc.context_mark
+        report(path, mark.line + 1 if mark else 1, f"invalid YAML: {exc.problem or exc}")
+        return None
+    schema = json.loads(CONFIG_SCHEMA.read_text(encoding="utf-8"))
+    if check_schema(path, config, Draft202012Validator(schema), report):
+        buffer_ids = {}
+        for channel, named in config["targets"].items():
+            seen = set()
+            for name, target in named.items():
+                key = ["targets", channel, name]
+                if str(target).lower() in seen:
+                    report(path, line_of(config, key),
+                           f"{location(key)}: {target} is already a {channel} destination")
+                seen.add(str(target).lower())
+                if channel in SCHEDULED_CHANNELS:
+                    # A mislabeled ID must not route a post to a different network.
+                    if buffer_ids.setdefault(target, channel) != channel:
+                        report(path, line_of(config, key),
+                               f"{location(key)}: Buffer channel {target} is already "
+                               f"a {buffer_ids[target]} destination")
+    return config if report.errors == errors else None
+
+
+def check_destinations(path, data, targets, report):
+    """Check that skipped destinations exist and that every post has a destination."""
+    for post_path, post, channels in posts(data):
+        for index, entry in enumerate(post.get("skip", [])):
+            channel, _, name = entry.partition("/")
+            if name and name not in targets.get(channel, {}):
+                key = post_path + ["skip", index]
+                known = ", ".join(targets.get(channel, {})) or "none"
+                report(path, line_of(data, key),
+                       f"{location(key)}: config.yaml has no {channel} destination "
+                       f"named '{name}' (configured: {known})")
+        missing = [channel for channel in channels if not targets.get(channel)]
+        if missing:
+            report(path, line_of(data, post_path),
+                   f"{location(post_path)}: config.yaml has no destinations for "
+                   f"{', '.join(missing)}; skip them")
+        elif not any(destinations(post, channels, targets)):
+            report(path, line_of(data, post_path),
+                   f"{location(post_path)}: every destination is skipped")
 
 
 def link_length(url, channel):
@@ -201,8 +276,12 @@ def counted_length(text, channel):
     return len(text)
 
 
-def check_lengths(path, data, report):
+def check_lengths(path, data, report, targets=None):
     for post_path, post, channels in posts(data):
+        if targets is not None:
+            # Channels whose every destination is skipped by name aren't sent to.
+            sent = {channel for channel, _, _ in destinations(post, channels, targets)}
+            channels = [channel for channel in channels if channel in sent]
         for channel in channels:
             if channel not in LIMITS:
                 continue
@@ -303,6 +382,10 @@ def main(argv):
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema, format_checker=format_checker)
 
+    report = Reporter()
+    config = load_config(report)
+    targets = config["targets"] if config else None
+
     files = args.files or find_files()
     changed = {path.resolve() for path in args.files}
     if args.base:
@@ -312,9 +395,8 @@ def main(argv):
 
     if not files:
         print("No announcement files found.")
-        return 0
+        return 1 if report.errors else 0
 
-    report = Reporter()
     now = datetime.now(timezone.utc)
     link_cache = {}
     for path in files:
@@ -329,8 +411,10 @@ def main(argv):
             continue
         if not check_schema(path, data, validator, report):
             continue  # the remaining checks assume a valid structure
-        check_lengths(path, data, report)
+        check_lengths(path, data, report, targets)
         check_images(path, data, report)
+        if targets is not None:
+            check_destinations(path, data, targets, report)
         if path.resolve() in changed and not path.resolve().is_relative_to(examples):
             check_times(path, data, report, now)
             check_links(path, data, report, link_cache)

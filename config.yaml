@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=schema/config.schema.json
+#
+# How merged announcements are delivered. schema/config.schema.json describes
+# every key.
+
+# check (preview only), draft (drafts in Buffer and Groups.io, Slack previewed
+# only) or publish.
+mode: draft
+
+# Destinations per channel, by name. An announcement can skip a channel
+# (skip: [linkedin]) or a single destination (skip: [slack/otel-announcements]).
+targets:
+  # Buffer channel IDs
+  bluesky:
+    opentelemetry: "66d1f452ca3dab3e0a30bbab"
+  mastodon:
+    opentelemetry: "6477acbf4aa145702bc810d9"
+  linkedin:
+    opentelemetry: "64834470c20da04cd12c179e"
+  # Slack channel IDs in the CNCF workspace
+  slack:
+    opentelemetry: "CJFCJHG4Q"
+    otel-announcements: "C049G9W5NQ7"
+  # Group IDs on lists.cncf.io
+  groupsio:
+    cncf-opentelemetry-announce: 140639

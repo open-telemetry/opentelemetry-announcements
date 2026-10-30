@@ -18,12 +18,18 @@ every key.
 
 | Key | Meaning |
 | --- | ------- |
-| `text` | Text of the first post, sent to every channel when the pull request is merged. Write links inline. |
-| `subject` | Subject of the mailing list email. Required when `groupsio` is one of the channels. |
-| `channels` | Channels for the first post: `bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio`. Defaults to all. |
+| `text` | Text of the first post, sent to every destination when the pull request is merged. Write links inline. |
+| `subject` | Subject of the mailing list email. Required unless `groupsio` is skipped. |
+| `skip` | Channels or destinations the first post is not sent to: a channel (`bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio`) or a channel and the name of a destination in [`config.yaml`](config.yaml) (for example `slack/otel-announcements`). |
 | `bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio` | Text for one channel, instead of `text`. |
 | `image`, `alt` | Image file next to the announcement and its alternative text. Posted to Bluesky, Mastodon and LinkedIn. |
-| `follow_ups` | Later posts with a `publish_at` time (for example `2026-11-05T16:00:00Z`), scheduled in Buffer. Bluesky, Mastodon and LinkedIn only. |
+| `follow_ups` | Later posts with a `publish_at` time (for example `2026-11-05T16:00:00Z`), scheduled in Buffer. Bluesky, Mastodon and LinkedIn only; each can have its own `skip`. |
+
+For example, to leave out LinkedIn and one of the Slack channels:
+
+```yaml
+skip: [linkedin, slack/otel-announcements]
+```
 
 Every pull request is checked automatically:
 
@@ -32,6 +38,7 @@ Every pull request is checked automatically:
 | Structure against the schema | all files | error |
 | Length per channel as Buffer counts it: Bluesky 300 (links count as their host plus up to 16 characters), Mastodon 500 (links count as 23, most emoji as 2), LinkedIn 3,000 (links count as 24, most emoji as 2), Slack 40,000 | all files | error |
 | Image file exists | all files | error |
+| Skipped destinations exist in `config.yaml`, and at least one destination is left | all files | error |
 | `publish_at` is in the future | announcements added or changed in the pull request | error |
 | Links are reachable | announcements added or changed in the pull request | warning |
 
@@ -49,8 +56,8 @@ To preview how a file is posted to each channel:
 python .github/scripts/publish_announcements.py --check-only announcements/2026/<MM-DD>-<name>.yaml
 ```
 
-In VS Code, `.vscode/settings.json` maps the schema to the announcement files
-for autocompletion.
+In VS Code, `.vscode/settings.json` maps the schemas to the announcement files
+and `config.yaml` for autocompletion.
 
 ## How announcements are published
 
@@ -60,8 +67,8 @@ When a pull request that adds a file under `announcements/` is merged, the
 1. Checks the new files again and previews every post in the job summary. This
    job has no access to the credentials.
 2. Waits for a maintainer to approve the `announcements` environment.
-3. Delivers the first post to every channel and schedules the follow-ups in
-   Buffer:
+3. Delivers the first post to every destination in [`config.yaml`](config.yaml)
+   that the announcement doesn't skip, and schedules the follow-ups in Buffer:
 
    | Channel | Delivered through | Image | Follow-ups |
    | ------- | ----------------- | ----- | ---------- |
@@ -80,8 +87,8 @@ The workflow runs in one of three modes:
 | `draft` | Create drafts | Create drafts | Preview only, nothing is sent |
 | `publish` | Publish the first post now, schedule follow-ups | Post to the list | Send the message |
 
-Merges use the mode in the `ANNOUNCEMENT_MODE` repository variable, and
-`draft` if it is not set. Manual runs default to `check`.
+Merges use the `mode` in [`config.yaml`](config.yaml). Manual runs choose a
+mode and default to `check`.
 
 ### Results, failures and retries
 
@@ -110,7 +117,30 @@ files. Don't use this repository for embargoed content.
 
 ## Setup
 
-These are configured in the repository settings by the maintainers.
+[`config.yaml`](config.yaml) holds the mode and the destinations, so changes
+to them go through a pull request like announcements do:
+
+```yaml
+mode: draft
+targets:
+  bluesky:
+    opentelemetry: "BUFFER_CHANNEL_ID"
+  slack:
+    opentelemetry: "C0123456789"
+    otel-announcements: "C0123456789"
+  groupsio:
+    cncf-opentelemetry-announce: 12345
+```
+
+Each destination has a name, which announcements use to skip it. Buffer
+destinations are channel IDs (not organization IDs), one per service. Slack
+destinations are channel IDs, not names: the last part of the channel's link.
+Groups.io destinations are group IDs on `lists.cncf.io`. Every channel that an
+announcement doesn't skip needs at least one destination.
+[`schema/config.schema.json`](schema/config.schema.json) describes every key.
+The IDs aren't secret; they appear in every delivery report.
+
+The rest is configured in the repository settings by the maintainers.
 
 **`announcements` environment**: add required reviewers and limit deployment
 to the `main` branch. Store these secrets in the environment:
@@ -121,40 +151,21 @@ to the `main` branch. Store these secrets in the environment:
 | `SLACK_WEBHOOK_URL` | Slack | The webhook URL of the Slack workflow below (`https://hooks.slack.com/triggers/...`); other URLs are rejected |
 | `GROUPSIO_API_KEY` | Mailing list | A `lists.cncf.io` API key of an account that is subscribed to the lists and allowed to post |
 
-**`ANNOUNCEMENT_TARGETS` repository variable**: the destinations per channel,
-as JSON. For example (not the real IDs):
-
-```json
-{
-  "bluesky": ["BUFFER_BLUESKY_CHANNEL_ID"],
-  "mastodon": ["BUFFER_MASTODON_CHANNEL_ID"],
-  "linkedin": ["BUFFER_LINKEDIN_CHANNEL_ID"],
-  "slack": ["C0123456789"],
-  "groupsio": [12345]
-}
-```
-
-Buffer destinations are channel IDs (not organization IDs), one per service.
-Slack destinations are channel IDs, not names. Groups.io destinations are group
-IDs on `lists.cncf.io`. Every channel that an announcement uses needs at least
-one destination.
-
-**`ANNOUNCEMENT_MODE` repository variable** (optional): `draft` (the default)
-or `publish`.
-
 **Slack workflow**: in Slack Workflow Builder, create a workflow that starts
 **from a webhook** with two variables: `channel` (type _Slack channel ID_) and
 `text` (type _Text_). Add a **Send a message to a channel** step that posts
 `text` to `channel`. Publish it and store its URL as `SLACK_WEBHOOK_URL`.
 Messages appear as sent by the workflow, which belongs to the person who
-created it, so add a second collaborator.
+created it, so add a second collaborator. The owner must be allowed to post in
+every configured Slack channel.
 
 ### Delivery status
 
 Each delivery path is covered by unit tests with mocked requests. Against the
-real services, only Groups.io drafts have been verified so far, and Slack
-accepts the webhook payload. Until the others are verified, keep
-`ANNOUNCEMENT_MODE` at `draft`.
+real services, Buffer drafts and Groups.io drafts have been verified, and Slack
+accepts the webhook payload. Publishing to Buffer, the mailing list and Slack
+is not verified yet, so `mode` in `config.yaml` stays at `draft` until the
+first announcement is published.
 
 ## Development
 

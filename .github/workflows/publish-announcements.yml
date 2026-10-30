@@ -15,7 +15,7 @@ on:
         required: true
         type: string
       mode:
-        description: check (preview only), draft (drafts in Buffer and Groups.io) or publish
+        description: check (preview only), draft (drafts in Buffer and Groups.io) or publish; overrides config.yaml
         required: true
         type: choice
         options:
@@ -34,11 +34,6 @@ concurrency:
   cancel-in-progress: false
   queue: max
 
-env:
-  # Until the delivery paths are verified, pushes create drafts. Set the
-  # ANNOUNCEMENT_MODE variable to publish to send announcements directly.
-  MODE: ${{ inputs.mode || vars.ANNOUNCEMENT_MODE || 'draft' }}
-
 jobs:
   # Runs without the environment or secrets, so the announcements are checked
   # and previewed in the job summary before anyone is asked to approve.
@@ -50,6 +45,7 @@ jobs:
       contents: read # for actions/checkout
     outputs:
       count: ${{ steps.check.outputs.count }}
+      mode: ${{ steps.check.outputs.mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,21 +62,22 @@ jobs:
       - name: Check and preview
         id: check
         env:
-          ANNOUNCEMENT_TARGETS: ${{ vars.ANNOUNCEMENT_TARGETS }}
           BEFORE: ${{ github.event.before }}
           FILES: ${{ inputs.files }}
+          # Empty for pushes: the mode in config.yaml applies.
+          MODE: ${{ inputs.mode }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             read -ra args <<< "$FILES"
           else
             args=(--since "$BEFORE")
           fi
-          python .github/scripts/publish_announcements.py --check-only --mode "$MODE" "${args[@]}"
+          python .github/scripts/publish_announcements.py --check-only ${MODE:+--mode "$MODE"} "${args[@]}"
 
   deliver:
     name: Deliver announcements
     needs: check
-    if: ${{ needs.check.outputs.count != '0' && (inputs.mode || vars.ANNOUNCEMENT_MODE || 'draft') != 'check' }}
+    if: ${{ needs.check.outputs.count != '0' && needs.check.outputs.mode != 'check' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Configure required reviewers on this environment; it holds the secrets.
@@ -102,9 +99,10 @@ jobs:
 
       - name: Deliver
         env:
-          ANNOUNCEMENT_TARGETS: ${{ vars.ANNOUNCEMENT_TARGETS }}
           BEFORE: ${{ github.event.before }}
           FILES: ${{ inputs.files }}
+          # The mode the check job previewed.
+          MODE: ${{ needs.check.outputs.mode }}
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GROUPSIO_API_KEY: ${{ secrets.GROUPSIO_API_KEY }}

@@ -16,12 +16,12 @@
       "minLength": 1,
       "maxLength": 300,
       "pattern": "^[^\\n]+$",
-      "description": "Subject of the mailing list email. Required when the mailing list (groupsio) is one of the channels."
+      "description": "Subject of the mailing list email. Required unless groupsio is skipped."
     },
-    "channels": {
+    "skip": {
       "type": "array",
-      "description": "Channels for the first post. Defaults to all channels.",
-      "items": { "$ref": "#/$defs/channel" },
+      "description": "Channels (for example linkedin) or single destinations from config.yaml (for example slack/otel-announcements) that the first post is not sent to. By default, it is sent to every destination.",
+      "items": { "$ref": "#/$defs/skipEntry" },
       "minItems": 1,
       "uniqueItems": true
     },
@@ -45,16 +45,8 @@
   },
   "allOf": [
     {
-      "description": "The mailing list needs a subject. It is selected when channels is omitted or lists groupsio.",
-      "if": {
-        "anyOf": [
-          { "not": { "required": ["channels"] } },
-          {
-            "required": ["channels"],
-            "properties": { "channels": { "contains": { "const": "groupsio" } } }
-          }
-        ]
-      },
+      "description": "The mailing list needs a subject unless groupsio is skipped.",
+      "if": { "not": { "$ref": "#/$defs/skips/groupsio" } },
       "then": { "required": ["subject"] }
     },
     { "$ref": "#/$defs/overrideNeedsChannel/bluesky" },
@@ -64,11 +56,17 @@
     { "$ref": "#/$defs/overrideNeedsChannel/groupsio" }
   ],
   "$defs": {
-    "channel": {
-      "enum": ["bluesky", "mastodon", "linkedin", "slack", "groupsio"]
+    "skipEntry": {
+      "type": "string",
+      "description": "A channel, or a channel and the name of one of its destinations in config.yaml.",
+      "pattern": "^(bluesky|mastodon|linkedin|slack|groupsio)(/[a-z0-9][a-z0-9-]*)?$",
+      "not": { "pattern": "\\s" }
     },
-    "scheduledChannel": {
-      "enum": ["bluesky", "mastodon", "linkedin"]
+    "scheduledSkipEntry": {
+      "type": "string",
+      "description": "A channel that supports scheduling, or a channel and the name of one of its destinations in config.yaml.",
+      "pattern": "^(bluesky|mastodon|linkedin)(/[a-z0-9][a-z0-9-]*)?$",
+      "not": { "pattern": "\\s" }
     },
     "text": {
       "type": "string",
@@ -98,10 +96,10 @@
           "description": "When Buffer publishes the post, in ISO 8601 with a time zone, for example 2026-11-05T16:00:00Z."
         },
         "text": { "$ref": "#/$defs/text" },
-        "channels": {
+        "skip": {
           "type": "array",
-          "description": "Channels for this follow-up. Defaults to bluesky, mastodon and linkedin.",
-          "items": { "$ref": "#/$defs/scheduledChannel" },
+          "description": "Channels or destinations that this follow-up is not sent to. By default, it is sent to every Bluesky, Mastodon and LinkedIn destination.",
+          "items": { "$ref": "#/$defs/scheduledSkipEntry" },
           "minItems": 1,
           "uniqueItems": true
         },
@@ -121,27 +119,19 @@
         { "$ref": "#/$defs/overrideNeedsChannel/linkedin" }
       ]
     },
+    "skips": {
+      "bluesky": { "required": ["skip"], "properties": { "skip": { "contains": { "const": "bluesky" } } } },
+      "mastodon": { "required": ["skip"], "properties": { "skip": { "contains": { "const": "mastodon" } } } },
+      "linkedin": { "required": ["skip"], "properties": { "skip": { "contains": { "const": "linkedin" } } } },
+      "slack": { "required": ["skip"], "properties": { "skip": { "contains": { "const": "slack" } } } },
+      "groupsio": { "required": ["skip"], "properties": { "skip": { "contains": { "const": "groupsio" } } } }
+    },
     "overrideNeedsChannel": {
-      "bluesky": {
-        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "bluesky" } } } } },
-        "then": { "not": { "required": ["bluesky"] } }
-      },
-      "mastodon": {
-        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "mastodon" } } } } },
-        "then": { "not": { "required": ["mastodon"] } }
-      },
-      "linkedin": {
-        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "linkedin" } } } } },
-        "then": { "not": { "required": ["linkedin"] } }
-      },
-      "slack": {
-        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "slack" } } } } },
-        "then": { "not": { "required": ["slack"] } }
-      },
-      "groupsio": {
-        "if": { "required": ["channels"], "properties": { "channels": { "not": { "contains": { "const": "groupsio" } } } } },
-        "then": { "not": { "required": ["groupsio"] } }
-      }
+      "bluesky": { "if": { "$ref": "#/$defs/skips/bluesky" }, "then": { "not": { "required": ["bluesky"] } } },
+      "mastodon": { "if": { "$ref": "#/$defs/skips/mastodon" }, "then": { "not": { "required": ["mastodon"] } } },
+      "linkedin": { "if": { "$ref": "#/$defs/skips/linkedin" }, "then": { "not": { "required": ["linkedin"] } } },
+      "slack": { "if": { "$ref": "#/$defs/skips/slack" }, "then": { "not": { "required": ["slack"] } } },
+      "groupsio": { "if": { "$ref": "#/$defs/skips/groupsio" }, "then": { "not": { "required": ["groupsio"] } } }
     }
   }
 }

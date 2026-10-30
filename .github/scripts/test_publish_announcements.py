@@ -24,15 +24,24 @@ follow_ups:
   - publish_at: "2099-01-01T16:00:00Z"
     text: Reminder https://opentelemetry.io/blog/2026/news/
   - publish_at: "2099-01-02T16:00:00Z"
-    channels: [mastodon]
+    skip: [bluesky, linkedin]
     text: Last call
 """
 SIMPLE = "subject: OpenTelemetry news\ntext: Simple news\n"
 TARGETS = {
-    "linkedin": ["linkedin-id"], "bluesky": ["bluesky-id"],
-    "mastodon": ["mastodon-id"], "slack": ["C123", "C456"],
-    "groupsio": [123, 456],
+    "linkedin": {"main": "linkedin-id"}, "bluesky": {"main": "bluesky-id"},
+    "mastodon": {"main": "mastodon-id"}, "slack": {"general": "C123", "news": "C456"},
+    "groupsio": {"announce": 123, "dev": 456},
 }
+CONFIG = """\
+mode: draft
+targets:
+  linkedin: {main: linkedin-id}
+  bluesky: {main: bluesky-id}
+  mastodon: {main: mastodon-id}
+  slack: {general: C123, news: C456}
+  groupsio: {announce: 123, dev: 456}
+"""
 WEBHOOK = "https://hooks.slack.com/triggers/T000/123/test"
 CREDS = {
     "BUFFER_API_KEY": "test-value", "GROUPSIO_API_KEY": "test-value",
@@ -60,9 +69,14 @@ class Files:
         return path, publish.load(path, now=check.datetime.now(check.timezone.utc),
                                   report=check.Reporter())
 
-    def plan(self, mode="publish", content=ANNOUNCEMENT, targets=None, channels=None):
-        if channels is not None:
-            content = f"channels: {json.dumps(channels)}\n" + content
+    def write_config(self, content=CONFIG):
+        path = self.root / "config.yaml"
+        path.write_text(textwrap.dedent(content), encoding="utf-8")
+        return path
+
+    def plan(self, mode="publish", content=ANNOUNCEMENT, targets=None, skip=None):
+        if skip is not None:
+            content = f"skip: {json.dumps(skip)}\n" + content
         return publish.build_plan(
             [self.load(content)], TARGETS if targets is None else targets, mode,
             image_base=IMAGE_BASE, root=self.root,
@@ -86,6 +100,11 @@ def publisher(credentials=None):
     return publish.Publisher(CREDS if credentials is None else credentials)
 
 
+def only(channel):
+    """Return a skip list that leaves only channel."""
+    return [other for other in check.CHANNELS if other != channel]
+
+
 def buffer_channel(channel="linkedin", target="linkedin-id"):
     return {"data": {"channel": {
         "id": target, "service": channel, "isLocked": False, "isDisconnected": False,
@@ -99,10 +118,10 @@ def buffer_post(status="sending", post_id="post-id"):
 class LengthTests(TestCase):
     LONG_URL = "https://opentelemetry.io/" + "a" * 75  # 100 characters
 
-    def errors(self, content):
+    def errors(self, content, targets=None):
         report = check.Reporter()
         path = self.files.write(content)
-        check.check_lengths(path, check.load_yaml(path), report)
+        check.check_lengths(path, check.load_yaml(path), report, targets)
         return report.errors
 
     def test_links_count_per_channel(self):
@@ -128,13 +147,19 @@ class LengthTests(TestCase):
     def test_long_bluesky_link_is_not_counted_as_23(self):
         # 276 letters, a space and the link: 277 + 32 = 309 on Bluesky.
         self.assertEqual(
-            self.errors(f"channels: [bluesky]\ntext: {'a' * 276} {self.LONG_URL}\n"), 1)
+            self.errors(f"skip: {only('bluesky')}\ntext: {'a' * 276} {self.LONG_URL}\n"), 1)
         self.assertEqual(
-            self.errors(f"channels: [bluesky]\ntext: {'a' * 267} {self.LONG_URL}\n"), 0)
+            self.errors(f"skip: {only('bluesky')}\ntext: {'a' * 267} {self.LONG_URL}\n"), 0)
+
+    def test_destinations_skipped_by_name_are_not_counted(self):
+        content = f"skip: [bluesky/main]\ntext: {'a' * 301}\n"
+        self.assertEqual(self.errors(content), 1)
+        self.assertEqual(self.errors(content, TARGETS), 0)
+        self.assertEqual(self.errors(f"skip: [slack/news]\ntext: {'a' * 301}\n", TARGETS), 1)
 
     def test_mastodon_limit_with_emoji(self):
-        self.assertEqual(self.errors(f"channels: [mastodon]\ntext: {'🚀' * 251}\n"), 1)
-        self.assertEqual(self.errors(f"channels: [mastodon]\ntext: {'🚀' * 250}\n"), 0)
+        self.assertEqual(self.errors(f"skip: {only('mastodon')}\ntext: {'🚀' * 251}\n"), 1)
+        self.assertEqual(self.errors(f"skip: {only('mastodon')}\ntext: {'🚀' * 250}\n"), 0)
 
 
 class PlanTests(TestCase):
@@ -142,9 +167,10 @@ class PlanTests(TestCase):
         items = self.plan()
         first = [item for item in items if item["post"] == 0]
         self.assertEqual(
-            [(item["channel"], item["target"]) for item in first],
-            [("bluesky", "bluesky-id"), ("mastodon", "mastodon-id"), ("linkedin", "linkedin-id"),
-             ("slack", "C123"), ("slack", "C456"), ("groupsio", 123), ("groupsio", 456)],
+            [(item["channel"], item["destination"], item["target"]) for item in first],
+            [("bluesky", "main", "bluesky-id"), ("mastodon", "main", "mastodon-id"),
+             ("linkedin", "main", "linkedin-id"), ("slack", "general", "C123"),
+             ("slack", "news", "C456"), ("groupsio", "announce", 123), ("groupsio", "dev", 456)],
         )
         self.assertEqual([item["channel"] for item in items if item["post"] == 1],
                          ["bluesky", "mastodon", "linkedin"])
@@ -178,30 +204,38 @@ class PlanTests(TestCase):
         loaded = self.files.load()
         with self.assertRaisesRegex(publish.DeliveryError, "GITHUB_REPOSITORY"):
             publish.build_plan([loaded], TARGETS, "publish", root=self.files.root)
-        items = publish.build_plan([loaded], {}, "check", root=self.files.root)
+        items = publish.build_plan([loaded], TARGETS, "check", root=self.files.root)
         self.assertTrue(all("image_url" not in item for item in items))
 
-    def test_check_mode_only_previews_without_targets(self):
-        items = self.plan("check", targets={})
+    def test_check_mode_only_previews(self):
+        items = self.plan("check")
         self.assertTrue(all(item["action"] == "preview" for item in items))
-        self.assertTrue(all(item["target"] is None for item in items))
-        self.assertEqual(len(items), 9)
+        self.assertEqual(len(items), 11)
 
     def test_draft_mode_previews_slack(self):
         items = self.plan("draft")
         for item in items:
             self.assertEqual(item["action"], "preview" if item["channel"] == "slack" else "draft")
 
-    def test_selected_channels(self):
-        items = self.plan(channels=["slack"], content=SIMPLE)
-        self.assertEqual([item["channel"] for item in items], ["slack", "slack"])
+    def test_skipped_channels_and_destinations(self):
+        items = self.plan(skip=["linkedin", "slack/news", "groupsio"], content=SIMPLE)
+        self.assertEqual([(item["channel"], item["destination"]) for item in items],
+                         [("bluesky", "main"), ("mastodon", "main"), ("slack", "general")])
+        items = self.plan(skip=only("slack"), content=SIMPLE)
+        self.assertEqual([item["target"] for item in items], ["C123", "C456"])
+
+    def test_skipped_destinations_in_follow_ups(self):
+        content = SIMPLE + ("follow_ups:\n  - publish_at: '2099-01-01T16:00:00Z'\n"
+                            "    skip: [bluesky/main, linkedin]\n    text: Reminder\n")
+        items = [item for item in self.plan(content=content) if item["post"] == 1]
+        self.assertEqual([item["channel"] for item in items], ["mastodon"])
 
     def test_missing_targets(self):
         with self.assertRaisesRegex(publish.DeliveryError, "No targets configured for groupsio"):
             self.plan(targets={key: value for key, value in TARGETS.items() if key != "groupsio"})
 
     def test_too_many_deliveries(self):
-        targets = {**TARGETS, "slack": [f"C{index}" for index in range(50)]}
+        targets = {**TARGETS, "slack": {f"c{index}": f"C{index}" for index in range(50)}}
         with self.assertRaisesRegex(publish.DeliveryError, "At most"):
             self.plan(targets=targets)
 
@@ -214,6 +248,10 @@ class PlanTests(TestCase):
             "text: [\n",  # invalid YAML
             "text: Hi\n",  # groupsio needs a subject
             "subject: Hi\ntext: Hi\nreddit: Hi\n",
+            "subject: Hi\ntext: Hi\nchannels: [slack]\n",  # replaced by skip
+            "subject: Hi\ntext: Hi\nskip: [reddit]\n",
+            'subject: Hi\ntext: Hi\nskip: ["linkedin\\n"]\n',  # $ matches before a newline
+            "text: Hi\nskip: [slack]\nslack: Hi\n",  # text for a skipped channel
             "subject: Hi\ntext: " + "a" * 301 + "\n",  # too long for Bluesky
             "subject: Hi\ntext: Hi\nimage: missing.png\nalt: Missing\n",
             "subject: Hi\ntext: Hi\nfollow_ups:\n  - publish_at: '2020-01-01T00:00:00Z'\n    text: Hi\n",
@@ -221,19 +259,6 @@ class PlanTests(TestCase):
         for content in cases:
             with self.subTest(content=content), self.assertRaises(publish.DeliveryError):
                 self.files.load(content)
-
-    def test_targets(self):
-        self.assertEqual(publish.parse_targets(""), {})
-        self.assertEqual(publish.parse_targets(json.dumps(TARGETS)), TARGETS)
-        cases = [
-            "not json", "[]", '{"reddit": ["x"]}', '{"slack": []}',
-            '{"groupsio": [true]}', '{"groupsio": ["123"]}', '{"groupsio": [0]}',
-            '{"slack": ["general"]}', '{"slack": ["#announcements"]}', '{"slack": ["C123", "C123"]}',
-            '{"linkedin": ["abc", "ABC"]}', '{"linkedin": ["same"], "bluesky": ["same"]}',
-        ]
-        for value in cases:
-            with self.subTest(value=value), self.assertRaises(publish.DeliveryError):
-                publish.parse_targets(value)
 
     def test_resolve_only_allows_announcement_files(self):
         path = self.files.write()
@@ -248,6 +273,82 @@ class PlanTests(TestCase):
 
     def test_added_since_without_previous_commit(self):
         self.assertEqual(publish.added_since("0" * 40), [])
+
+
+class ConfigTests(TestCase):
+    def load(self, content):
+        report = check.Reporter()
+        return check.load_config(report, self.files.write_config(content)), report.errors
+
+    def test_valid_config(self):
+        config, errors = self.load(CONFIG)
+        self.assertEqual(errors, 0)
+        self.assertEqual(config["mode"], "draft")
+        self.assertEqual(config["targets"], TARGETS)
+
+    def test_invalid_configs(self):
+        cases = [
+            "mode: [\n",  # invalid YAML
+            CONFIG.replace("mode: draft", "mode: send"),
+            CONFIG.replace("mode: draft\n", ""),
+            CONFIG + "  reddit: {main: x}\n",
+            CONFIG.replace("{general: C123, news: C456}", "{general: '#general'}"),
+            CONFIG.replace("{general: C123, news: C456}", "{General: C123}"),
+            CONFIG.replace("{general: C123, news: C456}", "{}"),
+            CONFIG.replace("{announce: 123, dev: 456}", "{announce: '123'}"),
+            CONFIG.replace("{announce: 123, dev: 456}", "{announce: 0}"),
+            CONFIG.replace("{general: C123, news: C456}", "{general: C123, news: C123}"),
+            CONFIG.replace("{general: C123, news: C456}", "{123: C123}"),  # a number, not a name
+            CONFIG.replace("{general: C123, news: C456}", '{"general\\n": C123}'),
+            CONFIG.replace("{general: C123, news: C456}", '{general: "C123\\n"}'),
+            CONFIG.replace("{main: bluesky-id}", "{main: linkedin-id}"),
+        ]
+        for content in cases:
+            with self.subTest(content=content):
+                config, errors = self.load(content)
+                self.assertIsNone(config)
+                self.assertGreater(errors, 0)
+
+    def test_missing_config(self):
+        report = check.Reporter()
+        self.assertIsNone(check.load_config(report, self.files.root / "missing.yaml"))
+        self.assertEqual(report.errors, 1)
+
+
+class DestinationTests(TestCase):
+    def messages(self, content, targets=TARGETS):
+        report = MagicMock()
+        path = self.files.write(content)
+        check.check_destinations(path, check.load_yaml(path), targets, report)
+        return [call.args[2] for call in report.call_args_list]
+
+    def test_valid_skips(self):
+        self.assertEqual(self.messages("text: Hi\nskip: [groupsio, slack/news]\n"), [])
+
+    def test_unknown_destination(self):
+        self.assertEqual(self.messages("text: Hi\nskip: [slack/random]\n"), [
+            "skip[0]: config.yaml has no slack destination named 'random' (configured: general, news)",
+        ])
+
+    def test_every_destination_skipped(self):
+        content = "text: Hi\nskip: [bluesky, mastodon, linkedin, groupsio, slack/general, slack/news]\n"
+        self.assertEqual(self.messages(content), ["(top level): every destination is skipped"])
+
+    def test_channel_without_destinations(self):
+        targets = {key: value for key, value in TARGETS.items() if key != "groupsio"}
+        self.assertEqual(self.messages("text: Hi\n", targets), [
+            "(top level): config.yaml has no destinations for groupsio; skip them",
+        ])
+        self.assertEqual(self.messages("text: Hi\nskip: [groupsio]\n", targets), [])
+
+    def test_skip_errors_are_readable(self):
+        report = MagicMock()
+        path = self.files.write("text: Hi\nskip: [reddit]\n")
+        schema = json.loads(check.SCHEMA.read_text(encoding="utf-8"))
+        check.check_schema(path, check.load_yaml(path),
+                           check.Draft202012Validator(schema), report)
+        self.assertIn("'reddit' must be a channel (bluesky, mastodon, linkedin, slack, groupsio)",
+                      report.call_args.args[2])
 
 
 class PreflightTests(TestCase):
@@ -417,7 +518,7 @@ class DeliveryTests(TestCase):
             with self.subTest(mode=mode):
                 request.reset_mock()
                 request.side_effect = [{"object": "draft", "id": 12}, {"object": "draft", "id": 12}, None]
-                items = self.plan(mode, content, {"groupsio": [123]}, ["groupsio"])
+                items = self.plan(mode, content, {"groupsio": {"announce": 123}}, only("groupsio"))
                 self.assertTrue(publisher().run(items))
                 calls = request.call_args_list
                 self.assertEqual(calls[0].args[0], "https://lists.cncf.io/api/v1/newdraft")
@@ -435,7 +536,7 @@ class DeliveryTests(TestCase):
     @patch("publish_announcements.request")
     def test_failed_groupsio_update_leaves_draft_id_and_never_posts(self, request):
         request.side_effect = [{"object": "draft", "id": 12}, {"object": "error", "type": "bad_request"}]
-        items = self.plan(targets={"groupsio": [123]}, channels=["groupsio"], content=SIMPLE)
+        items = self.plan(targets={"groupsio": {"announce": 123}}, skip=only("groupsio"), content=SIMPLE)
         self.assertFalse(publisher().run(items))
         self.assertEqual(items[0]["remote_id"], 12)
         self.assertEqual(items[0]["remote_status"], "empty-draft")
@@ -522,14 +623,17 @@ class TransportTests(unittest.TestCase):
 
 
 class MainTests(TestCase):
-    def run_main(self, args, env):
+    def run_main(self, args, env=None, config=CONFIG):
         path = self.files.write()
+        self.files.write_config(config)
         directory = self.files.root / "out"
         directory.mkdir(exist_ok=True)
         summary, output = directory / "summary", directory / "output"
+        for name in (summary, output):
+            name.unlink(missing_ok=True)
         env = {"GITHUB_STEP_SUMMARY": str(summary), "GITHUB_OUTPUT": str(output),
                "GITHUB_REPOSITORY": "open-telemetry/opentelemetry-announcements",
-               "GITHUB_SHA": "abc", **env}
+               "GITHUB_SHA": "abc", **(env or {})}
         with patch.object(publish, "ROOT", self.files.root), \
                 patch.dict(os.environ, env, clear=True):
             code = publish.main([*args, str(path)])
@@ -537,42 +641,54 @@ class MainTests(TestCase):
 
     @patch("publish_announcements.request")
     def test_check_only_renders_without_requests(self, request):
-        code, summary, output, _ = self.run_main(
-            ["--check-only", "--mode", "publish"], {"ANNOUNCEMENT_TARGETS": json.dumps(TARGETS)})
+        code, summary, output, _ = self.run_main(["--check-only", "--mode", "publish"])
         self.assertEqual(code, 0)
-        self.assertEqual(output, "count=1\n")
+        self.assertEqual(output, "count=1\nmode=publish\n")
+        self.assertIn("Mode: `publish`", summary)
         self.assertIn("Read our latest news", summary)
-        self.assertIn("follow-up 1, linkedin at 2099-01-01T16:00:00Z", summary)
+        self.assertIn("first post, slack (general, news)", summary)
+        self.assertIn("follow-up 1, linkedin (main) at 2099-01-01T16:00:00Z", summary)
         self.assertIn("<b>Subject:</b> OpenTelemetry news", summary)
         request.assert_not_called()
 
     @patch("publish_announcements.request")
-    def test_check_only_reports_missing_targets(self, request):
-        code, summary, output, _ = self.run_main(["--check-only", "--mode", "draft"], {})
-        self.assertEqual(code, 1)
-        self.assertIn("No targets configured", summary)
-        self.assertEqual(output, "count=0\n")
+    def test_mode_comes_from_config(self, request):
+        code, summary, output, _ = self.run_main(["--check-only"])
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "count=1\nmode=draft\n")
+        self.assertIn("Mode: `draft`", summary)
+        request.assert_not_called()
+
+    @patch("publish_announcements.request")
+    def test_check_only_reports_config_errors(self, request):
+        for config in [CONFIG.replace("mode: draft", "mode: send"),
+                       CONFIG.replace("  groupsio: {announce: 123, dev: 456}\n", "")]:
+            with self.subTest(config=config):
+                code, summary, output, _ = self.run_main(["--check-only"], config=config)
+                self.assertEqual(code, 1)
+                self.assertIn("has errors", summary)
+                self.assertEqual(output, "count=0\n")
         request.assert_not_called()
 
     @patch("publish_announcements.request")
     def test_report_has_no_content(self, request):
         code, summary, _, directory = self.run_main(
-            ["--mode", "check", "--report", str(self.files.root / "out")], {})
+            ["--mode", "check", "--report", str(self.files.root / "out")])
         self.assertEqual(code, 0)
         report = json.loads((directory / "report.json").read_text())
         self.assertTrue(report["success"])
-        self.assertEqual(len(report["deliveries"]), 9)
+        self.assertEqual(report["mode"], "check")
+        self.assertEqual(len(report["deliveries"]), 11)
         for item in report["deliveries"]:
             self.assertLessEqual(set(item), set(publish.REPORT_FIELDS))
         self.assertNotIn("latest news", json.dumps(report))
-        self.assertIn("preview: 9", summary)
+        self.assertIn("preview: 11", summary)
         request.assert_not_called()
 
     @patch("publish_announcements.request")
     def test_missing_secrets_fail_with_report(self, request):
         code, summary, _, directory = self.run_main(
-            ["--mode", "publish", "--report", str(self.files.root / "out")],
-            {"ANNOUNCEMENT_TARGETS": json.dumps(TARGETS)})
+            ["--mode", "publish", "--report", str(self.files.root / "out")])
         self.assertEqual(code, 1)
         report = json.loads((directory / "report.json").read_text())
         self.assertFalse(report["success"])

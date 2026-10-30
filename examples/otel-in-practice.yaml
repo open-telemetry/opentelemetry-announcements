@@ -44,7 +44,7 @@ follow_ups:
       🔗 https://opentelemetry.io/community/otel-in-practice/
 
   - publish_at: "2026-10-13T15:00:00Z"
-    channels: [bluesky, mastodon]
+    skip: [linkedin]
     text: |
       ⏰ In 1 hour: Diana Todea on contributing to OpenTelemetry beyond code.
       🔗 https://opentelemetry.io/community/otel-in-practice/
