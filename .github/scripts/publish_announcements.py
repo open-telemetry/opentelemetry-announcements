@@ -14,11 +14,11 @@ Modes:
   draft    create drafts in Buffer and Groups.io; Slack is previewed only
   publish  send the first post now and schedule the follow-ups
 
-With --check-only, files are validated and previewed for MODE without any
-requests. Destinations come from the ANNOUNCEMENT_TARGETS environment variable,
-a JSON object that maps channels to lists of IDs. Credentials come from
-BUFFER_API_KEY, SLACK_WEBHOOK_URL and GROUPSIO_API_KEY. Writes are never
-retried; with --report, a report of every delivery is written to DIR.
+The mode and the destinations come from config.yaml; --mode overrides the mode.
+With --check-only, files are validated and previewed for the mode without any
+requests. Credentials come from BUFFER_API_KEY, SLACK_WEBHOOK_URL and
+GROUPSIO_API_KEY. Writes are never retried; with --report, a report of every
+delivery is written to DIR.
 """
 
 import argparse
@@ -41,14 +41,13 @@ from ruamel.yaml.error import MarkedYAMLError
 import check_announcements as check
 
 ROOT = check.ROOT
-CHANNELS = set(check.CHANNELS)
 BUFFER_CHANNELS = {"linkedin", "bluesky", "mastodon"}
 DRAFT_CHANNELS = BUFFER_CHANNELS | {"groupsio"}
 MODES = ("check", "draft", "publish")
 MAX_DESTINATIONS = 50
 GROUPSIO_API = "https://lists.cncf.io/api/v1"
 REPORT_FIELDS = (
-    "file", "post", "channel", "target", "action", "publish_at",
+    "file", "post", "channel", "destination", "target", "action", "publish_at",
     "status", "remote_id", "remote_status", "error",
 )
 SECRETS = {
@@ -130,7 +129,7 @@ def groupsio_html(text):
     return "<p>" + "".join(parts).replace("\n", "<br>\n") + "</p>"
 
 
-def load(path, *, now, report, times=True):
+def load(path, *, now, report, times=True, targets=None):
     """Load an announcement and run every check on it; raise if any fails."""
     errors = report.errors
     try:
@@ -144,6 +143,8 @@ def load(path, *, now, report, times=True):
         if check.check_schema(path, data, validator, report):
             check.check_lengths(path, data, report)
             check.check_images(path, data, report)
+            if targets is not None:
+                check.check_destinations(path, data, targets, report)
             if times:
                 check.check_times(path, data, report, now)
     if report.errors > errors:
@@ -157,40 +158,12 @@ def display(path, root=None):
     return str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
 
 
-def parse_targets(value):
-    try:
-        targets = json.loads(value) if value and value.strip() else {}
-    except ValueError as exc:
-        raise DeliveryError("ANNOUNCEMENT_TARGETS must be valid JSON") from exc
-    if not isinstance(targets, dict) or set(targets) - CHANNELS:
-        raise DeliveryError("ANNOUNCEMENT_TARGETS must be an object keyed by channel names")
-    buffer_ids = set()
-    for channel, destinations in targets.items():
-        if not isinstance(destinations, list) or not destinations:
-            raise DeliveryError(f"{channel} targets must be a nonempty array")
-        for destination in destinations:
-            if channel == "groupsio":
-                valid = type(destination) is int and destination > 0
-            else:
-                pattern = r"[CG][A-Z0-9]+" if channel == "slack" else r"[A-Za-z0-9_-]+"
-                valid = isinstance(destination, str) and re.fullmatch(pattern, destination)
-            if not valid:
-                raise DeliveryError(f"Invalid {channel} destination")
-        normalized = [str(value).lower() for value in destinations]
-        if len(set(normalized)) != len(normalized):
-            raise DeliveryError(f"Duplicate {channel} destination")
-        if channel in BUFFER_CHANNELS:
-            if buffer_ids & set(destinations):
-                raise DeliveryError("A Buffer channel ID cannot target multiple services")
-            buffer_ids |= set(destinations)
-    return targets
-
-
 def build_plan(announcements, targets, mode, *, image_base=None, root=None):
-    """Return one delivery per post, channel and destination.
+    """Return one delivery per post and destination.
 
-    announcements is a list of (path, data) pairs. image_base is the URL that
-    image paths relative to root are appended to; Buffer fetches images from it.
+    announcements is a list of (path, data) pairs and targets maps channels to
+    named destinations, as in config.yaml. image_base is the URL that image
+    paths relative to root are appended to; Buffer fetches images from it.
     """
     if mode not in MODES:
         raise DeliveryError(f"mode must be one of {', '.join(MODES)}")
@@ -201,34 +174,33 @@ def build_plan(announcements, targets, mode, *, image_base=None, root=None):
             image = None
             if "image" in post:
                 image = (Path(path).parent / post["image"]).resolve().relative_to(root).as_posix()
-            for channel in channels:
-                if channel not in targets and mode != "check":
-                    raise DeliveryError(f"No targets configured for {channel}")
-                # Previews (for example in pull requests) need no destinations.
-                for target in targets.get(channel, [None]):
-                    action = (
-                        "preview" if mode == "check"
-                        or (mode == "draft" and channel not in DRAFT_CHANNELS)
-                        else mode
-                    )
-                    item = {
-                        "file": display(path, root), "post": index,
-                        "channel": channel, "target": target, "action": action,
-                        "text": post.get(channel, post["text"]).strip(),
-                        "status": "pending",
-                    }
-                    if "publish_at" in post:
-                        item["publish_at"] = post["publish_at"]
-                    if channel == "groupsio":
-                        item["subject"] = data["subject"]
-                    if image and channel in BUFFER_CHANNELS:
-                        item["image"] = image
-                        item["alt"] = post["alt"]
-                        if action != "preview":
-                            if not image_base:
-                                raise DeliveryError("Images need GITHUB_REPOSITORY and GITHUB_SHA")
-                            item["image_url"] = image_base + image
-                    plan.append(item)
+            missing = [channel for channel in channels if not targets.get(channel)]
+            if missing:
+                raise DeliveryError(f"No targets configured for {', '.join(missing)}")
+            for channel, name, target in check.destinations(post, channels, targets):
+                action = (
+                    "preview" if mode == "check"
+                    or (mode == "draft" and channel not in DRAFT_CHANNELS)
+                    else mode
+                )
+                item = {
+                    "file": display(path, root), "post": index, "channel": channel,
+                    "destination": name, "target": target, "action": action,
+                    "text": post.get(channel, post["text"]).strip(),
+                    "status": "pending",
+                }
+                if "publish_at" in post:
+                    item["publish_at"] = post["publish_at"]
+                if channel == "groupsio":
+                    item["subject"] = data["subject"]
+                if image and channel in BUFFER_CHANNELS:
+                    item["image"] = image
+                    item["alt"] = post["alt"]
+                    if action != "preview":
+                        if not image_base:
+                            raise DeliveryError("Images need GITHUB_REPOSITORY and GITHUB_SHA")
+                        item["image_url"] = image_base + image
+                plan.append(item)
     if len(plan) > MAX_DESTINATIONS:
         raise DeliveryError(f"At most {MAX_DESTINATIONS} deliveries are allowed per run")
     return plan
@@ -428,11 +400,14 @@ def resolve(files, *, check_only):
 
 
 def rendered_summary(plan):
-    rendered = {}
+    rendered, names = {}, {}
     for item in plan:
-        rendered.setdefault((item["file"], item["post"], item["channel"]), item)
+        key = (item["file"], item["post"], item["channel"])
+        rendered.setdefault(key, item)
+        names.setdefault(key, []).append(item["destination"])
     lines = ["", "### Rendered content", ""] if rendered else []
     for (name, post, channel), item in rendered.items():
+        to = ", ".join(names[name, post, channel])
         when = f" at {item['publish_at']}" if "publish_at" in item else ""
         label = "first post" if post == 0 else f"follow-up {post}"
         extra = ""
@@ -441,7 +416,7 @@ def rendered_summary(plan):
         if "image" in item:
             extra += f"<b>Image:</b> {html.escape(item['image'])} ({html.escape(item['alt'])})\n"
         lines.append(
-            f"<details><summary>{html.escape(name)}: {label}, {channel}{when}</summary>"
+            f"<details><summary>{html.escape(name)}: {label}, {channel} ({html.escape(to)}){when}</summary>"
             f"<pre>{extra}{html.escape(item['text'])}</pre></details>"
         )
     return lines
@@ -466,12 +441,20 @@ def write_output(name, value):
             stream.write(f"{name}={value}\n")
 
 
-def prepare(args, report):
+def load_config(args, report):
+    """Return the mode and the targets from config.yaml; --mode overrides the mode."""
+    config = check.load_config(report, ROOT / "config.yaml")
+    if config is None:
+        raise DeliveryError("config.yaml has errors; see the messages above")
+    return args.mode or config["mode"], config["targets"]
+
+
+def prepare(args, report, mode, targets):
     files = list(args.files) + (added_since(args.since) if args.since else [])
     paths = resolve(files, check_only=args.check_only)
     now = datetime.now(timezone.utc)
     announcements = [
-        (path, load(path, now=now, report=report,
+        (path, load(path, now=now, report=report, targets=targets,
                     times=not path.is_relative_to(ROOT / "examples")))
         for path in paths
     ]
@@ -479,21 +462,26 @@ def prepare(args, report):
     if os.environ.get("GITHUB_REPOSITORY") and os.environ.get("GITHUB_SHA"):
         image_base = (f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/"
                       f"{os.environ['GITHUB_SHA']}/")
-    targets = parse_targets(os.environ.get("ANNOUNCEMENT_TARGETS", ""))
-    return paths, build_plan(announcements, targets, args.mode, image_base=image_base)
+    elif args.check_only:
+        # Previews never send anything, so local runs can use local image paths.
+        image_base = ROOT.as_uri() + "/"
+    return paths, build_plan(announcements, targets, mode, image_base=image_base)
 
 
 def check_only(args, report):
     """Validate and render without credentials or requests."""
-    summary = ["## Announcement check", "", f"Mode: `{args.mode}`", ""]
+    summary = ["## Announcement check", ""]
     try:
-        paths, plan = prepare(args, report)
+        mode, targets = load_config(args, report)
+        summary.extend([f"Mode: `{mode}`", ""])
+        paths, plan = prepare(args, report, mode, targets)
     except DeliveryError as exc:
         error(str(exc))
         write_summary([*summary, str(exc)])
         write_output("count", 0)
         return 1
     write_output("count", len(paths))
+    write_output("mode", mode)
     if not paths:
         print("No new announcements.", file=sys.stderr)
         write_summary([*summary, "No new announcements."])
@@ -523,7 +511,8 @@ def deliver(args, report):
         temporary.replace(output / "report.json")
 
     try:
-        _, result["deliveries"] = prepare(args, report)
+        result["mode"], targets = load_config(args, report)
+        _, result["deliveries"] = prepare(args, report, result["mode"], targets)
         save_report()
         success = Publisher(os.environ).run(result["deliveries"], on_progress=save_report)
     except DeliveryError as exc:
@@ -531,7 +520,7 @@ def deliver(args, report):
         error(str(exc))
     result["success"] = success
     save_report()
-    summary = ["## Announcement delivery", "", f"Mode: `{args.mode}`", ""]
+    summary = ["## Announcement delivery", "", f"Mode: `{result['mode']}`", ""]
     for status in ("preview", "drafted", "scheduled", "submitted", "failed", "pending"):
         count = sum(item["status"] == status for item in result["deliveries"])
         summary.append(f"- {status}: {count}")
@@ -540,7 +529,7 @@ def deliver(args, report):
     for item in result["deliveries"]:
         if item["status"] == "failed":
             summary.append(f"- {item['file']}, post {item['post']}, {item['channel']} "
-                           f"{item['target']}: {item.get('error', '')}")
+                           f"{item['destination']}: {item.get('error', '')}")
     summary.extend(rendered_summary(result["deliveries"]))
     if output:
         summary.extend(["", "See the report artifact for destinations and delivery IDs."])
@@ -552,7 +541,7 @@ def deliver(args, report):
 
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--mode", choices=MODES, default="check")
+    parser.add_argument("--mode", choices=MODES, help="overrides the mode in config.yaml")
     parser.add_argument("--check-only", action="store_true",
                         help="validate and preview for MODE without any requests")
     parser.add_argument("--since", help="also publish files under announcements/ added since this git ref")

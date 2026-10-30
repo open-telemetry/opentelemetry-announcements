@@ -3,6 +3,7 @@
     "./schema/announcement.schema.json": [
       "announcements/**/*.yaml",
       "examples/**/*.yaml"
-    ]
+    ],
+    "./schema/config.schema.json": "config.yaml"
   }
 }
