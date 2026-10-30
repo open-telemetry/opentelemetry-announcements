@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+#
+# Test of the delivery pipeline. In draft mode, a merge creates drafts in
+# Buffer (Bluesky, Mastodon, LinkedIn) and Groups.io and only previews the
+# Slack message. Delete the drafts, do not publish them.
+
+subject: "[TEST] Announcement pipeline draft, do not send"
+text: |
+  [TEST] This is a draft created by the OpenTelemetry announcements pipeline.
+  Please delete it, do not publish it.
+
+  🔗 https://opentelemetry.io/

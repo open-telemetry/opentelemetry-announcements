@@ -9,7 +9,9 @@ do, read the [Social Media Guide][] and the [Marketing Guidelines][].
 
 ## Requesting an announcement
 
-Add one YAML file per announcement under `announcements/<year>/<name>.yaml`.
+Add one YAML file per announcement under
+`announcements/<year>/<MM-DD>-<name>.yaml`, where the date is the day the first
+post is planned to go out (for example `announcements/2026/11-10-kubecon.yaml`).
 Start from [`examples/otel-in-practice.yaml`](examples/otel-in-practice.yaml);
 [`schema/announcement.schema.json`](schema/announcement.schema.json) describes
 every key.
@@ -44,7 +46,7 @@ python .github/scripts/check_announcements.py --base origin/main
 To preview how a file is posted to each channel:
 
 ```sh
-python .github/scripts/publish_announcements.py --check-only announcements/2026/<name>.yaml
+python .github/scripts/publish_announcements.py --check-only announcements/2026/<MM-DD>-<name>.yaml
 ```
 
 In VS Code, `.vscode/settings.json` maps the schema to the announcement files

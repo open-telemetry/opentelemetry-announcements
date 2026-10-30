@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       files:
-        description: Announcement files, separated by spaces (for example announcements/2026/kubecon.yaml)
+        description: Announcement files, separated by spaces (for example announcements/2026/11-10-kubecon.yaml)
         required: true
         type: string
       mode:
