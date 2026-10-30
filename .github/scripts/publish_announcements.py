@@ -141,7 +141,7 @@ def load(path, *, now, report, times=True, targets=None):
         schema = json.loads(check.SCHEMA.read_text(encoding="utf-8"))
         validator = Draft202012Validator(schema, format_checker=check.format_checker)
         if check.check_schema(path, data, validator, report):
-            check.check_lengths(path, data, report)
+            check.check_lengths(path, data, report, targets)
             check.check_images(path, data, report)
             if targets is not None:
                 check.check_destinations(path, data, targets, report)

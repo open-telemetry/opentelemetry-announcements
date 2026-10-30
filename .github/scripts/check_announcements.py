@@ -149,7 +149,7 @@ def describe(error):
     if error.validator in ("pattern", "format") and path and path[-1] == "publish_at":
         return [(path, f"'{error.instance}' is not a date and time with a time zone, "
                        "for example 2026-11-05T16:00:00Z")]
-    if error.validator == "pattern" and len(path) > 1 and path[-2] == "skip":
+    if error.validator in ("pattern", "not") and len(path) > 1 and path[-2] == "skip":
         channels = SCHEDULED_CHANNELS if "follow_ups" in path else CHANNELS
         return [(path, f"'{error.instance}' must be a channel ({', '.join(channels)}) or "
                        "a channel and destination from config.yaml, for example slack/opentelemetry")]
@@ -276,8 +276,12 @@ def counted_length(text, channel):
     return len(text)
 
 
-def check_lengths(path, data, report):
+def check_lengths(path, data, report, targets=None):
     for post_path, post, channels in posts(data):
+        if targets is not None:
+            # Channels whose every destination is skipped by name aren't sent to.
+            sent = {channel for channel, _, _ in destinations(post, channels, targets)}
+            channels = [channel for channel in channels if channel in sent]
         for channel in channels:
             if channel not in LIMITS:
                 continue
@@ -407,7 +411,7 @@ def main(argv):
             continue
         if not check_schema(path, data, validator, report):
             continue  # the remaining checks assume a valid structure
-        check_lengths(path, data, report)
+        check_lengths(path, data, report, targets)
         check_images(path, data, report)
         if targets is not None:
             check_destinations(path, data, targets, report)

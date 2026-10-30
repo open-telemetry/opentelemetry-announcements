@@ -118,10 +118,10 @@ def buffer_post(status="sending", post_id="post-id"):
 class LengthTests(TestCase):
     LONG_URL = "https://opentelemetry.io/" + "a" * 75  # 100 characters
 
-    def errors(self, content):
+    def errors(self, content, targets=None):
         report = check.Reporter()
         path = self.files.write(content)
-        check.check_lengths(path, check.load_yaml(path), report)
+        check.check_lengths(path, check.load_yaml(path), report, targets)
         return report.errors
 
     def test_links_count_per_channel(self):
@@ -150,6 +150,12 @@ class LengthTests(TestCase):
             self.errors(f"skip: {only('bluesky')}\ntext: {'a' * 276} {self.LONG_URL}\n"), 1)
         self.assertEqual(
             self.errors(f"skip: {only('bluesky')}\ntext: {'a' * 267} {self.LONG_URL}\n"), 0)
+
+    def test_destinations_skipped_by_name_are_not_counted(self):
+        content = f"skip: [bluesky/main]\ntext: {'a' * 301}\n"
+        self.assertEqual(self.errors(content), 1)
+        self.assertEqual(self.errors(content, TARGETS), 0)
+        self.assertEqual(self.errors(f"skip: [slack/news]\ntext: {'a' * 301}\n", TARGETS), 1)
 
     def test_mastodon_limit_with_emoji(self):
         self.assertEqual(self.errors(f"skip: {only('mastodon')}\ntext: {'🚀' * 251}\n"), 1)
@@ -244,6 +250,7 @@ class PlanTests(TestCase):
             "subject: Hi\ntext: Hi\nreddit: Hi\n",
             "subject: Hi\ntext: Hi\nchannels: [slack]\n",  # replaced by skip
             "subject: Hi\ntext: Hi\nskip: [reddit]\n",
+            'subject: Hi\ntext: Hi\nskip: ["linkedin\\n"]\n',  # $ matches before a newline
             "text: Hi\nskip: [slack]\nslack: Hi\n",  # text for a skipped channel
             "subject: Hi\ntext: " + "a" * 301 + "\n",  # too long for Bluesky
             "subject: Hi\ntext: Hi\nimage: missing.png\nalt: Missing\n",
@@ -291,6 +298,9 @@ class ConfigTests(TestCase):
             CONFIG.replace("{announce: 123, dev: 456}", "{announce: '123'}"),
             CONFIG.replace("{announce: 123, dev: 456}", "{announce: 0}"),
             CONFIG.replace("{general: C123, news: C456}", "{general: C123, news: C123}"),
+            CONFIG.replace("{general: C123, news: C456}", "{123: C123}"),  # a number, not a name
+            CONFIG.replace("{general: C123, news: C456}", '{"general\\n": C123}'),
+            CONFIG.replace("{general: C123, news: C456}", '{general: "C123\\n"}'),
             CONFIG.replace("{main: bluesky-id}", "{main: linkedin-id}"),
         ]
         for content in cases:

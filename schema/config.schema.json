@@ -22,7 +22,7 @@
         "slack": {
           "$ref": "#/$defs/destinations",
           "description": "Slack channel IDs (not names), for example C0123456789.",
-          "additionalProperties": { "type": "string", "pattern": "^[CG][A-Z0-9]+$" }
+          "additionalProperties": { "$ref": "#/$defs/id", "pattern": "^[CG][A-Z0-9]+$" }
         },
         "groupsio": {
           "$ref": "#/$defs/destinations",
@@ -33,15 +33,20 @@
     }
   },
   "$defs": {
+    "id": {
+      "description": "A string without whitespace. Quote names and IDs that YAML would read as numbers.",
+      "type": "string",
+      "not": { "type": "string", "pattern": "\\s" }
+    },
     "destinations": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$" }
+      "propertyNames": { "$ref": "#/$defs/id", "pattern": "^[a-z0-9][a-z0-9-]*$" }
     },
     "buffer": {
       "$ref": "#/$defs/destinations",
       "description": "Buffer channel IDs (not organization IDs), one per service.",
-      "additionalProperties": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
+      "additionalProperties": { "$ref": "#/$defs/id", "pattern": "^[A-Za-z0-9_-]+$" }
     }
   }
 }
