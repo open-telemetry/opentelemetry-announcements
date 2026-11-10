@@ -53,7 +53,7 @@ and `image` with `alt` when there is a visual.
 
 ```sh
 pip install --require-hashes --no-deps -r .github/requirements.txt
-python .github/scripts/check_announcements.py --base origin/main
+python .github/scripts/check_announcements.py --base origin/main <file>
 python .github/scripts/publish_announcements.py --check-only <file>
 ```
 
