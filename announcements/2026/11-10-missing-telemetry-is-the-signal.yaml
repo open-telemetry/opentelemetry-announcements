@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+
+subject: "New blog post: When Missing Telemetry Is the Signal"
+text: |
+  An empty dashboard can mean that nothing happened. It can also mean that the
+  system stopped reporting what happened. On a dashboard, they look the same.
+
+  Read it: https://opentelemetry.io/blog/2026/when-missing-telemetry-is-the-signal/
+groupsio: |
+  Hello everyone,
+
+  A new post is up on the OpenTelemetry blog: "When Missing Telemetry Is the
+  Signal".
+
+  An empty dashboard can mean that nothing happened. It can also mean that the
+  system stopped reporting what happened. On a dashboard, they look the same.
+  One needs no action. The other means you are missing the information you need
+  to act.
+
+  The post covers how to define what should be present, reconcile counts across
+  stages, use traces to locate the gap, send known activity through the full
+  path and monitor the telemetry path with the Collector's internal telemetry.
+
+  Read it: https://opentelemetry.io/blog/2026/when-missing-telemetry-is-the-signal/
