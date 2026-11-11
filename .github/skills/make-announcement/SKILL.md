@@ -43,11 +43,16 @@ text with a "Read it:" line and the link.
 ## 2. Write one text for all channels
 
 Write a single `text` that fits every channel, so it must pass Bluesky's
-300 characters (links count as host + up to 16 chars). Add a channel-specific
-key (`bluesky`, `linkedin`, `groupsio`, ...) or `skip` only when needed, e.g. a
-longer mailing list body with a greeting. `subject` is required for the mailing
-list unless `groupsio` is skipped. Use `follow_ups` for reminders (events),
-and `image` with `alt` when there is a visual.
+300 characters (links count as host + up to 16 chars). Wrapped lines are
+joined into one paragraph as in Markdown; separate paragraphs with a blank
+line. Add a channel-specific key (`bluesky`, `linkedin`, `groupsio`, ...) or
+`skip` only when needed, e.g. a longer mailing list body with a greeting. `subject` is required for the mailing
+list unless `groupsio` is skipped. Use `follow_ups` for reminders (events).
+
+Without an image, Bluesky and LinkedIn posts show a link card built from the
+first link's page title, description and preview image. An `image` (with
+`alt`) replaces that card, so add one only when it shows more than the linked
+page's own preview, for example a speaker card or a chart.
 
 ## 3. Validate and open the PR
 

@@ -18,11 +18,11 @@ every key.
 
 | Key | Meaning |
 | --- | ------- |
-| `text` | Text of the first post, sent to every destination when the pull request is merged. Write links inline. |
+| `text` | Text of the first post, sent to every destination when the pull request is merged. Write links inline. As in Markdown, wrapped lines are joined into one line; separate paragraphs with a blank line. Lines that start a list item (`-`, `*`, `1.`) stay on their own line. |
 | `subject` | Subject of the mailing list email. Required unless `groupsio` is skipped. |
 | `skip` | Channels or destinations the first post is not sent to: a channel (`bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio`) or a channel and the name of a destination in [`config.yaml`](config.yaml) (for example `slack/otel-announcements`). |
 | `bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio` | Text for one channel, instead of `text`. |
-| `image`, `alt` | Image file next to the announcement and its alternative text. Posted to Bluesky, Mastodon and LinkedIn. |
+| `image`, `alt` | Image file next to the announcement and its alternative text. Posted to Bluesky, Mastodon and LinkedIn. Without an image, Bluesky and LinkedIn posts get a link preview built from the first link's Open Graph tags; Mastodon builds its own. |
 | `follow_ups` | Later posts with a `publish_at` time (for example `2026-11-05T16:00:00Z`), scheduled in Buffer. Bluesky, Mastodon and LinkedIn only; each can have its own `skip`. |
 
 For example, to leave out LinkedIn and one of the Slack channels:
@@ -50,7 +50,8 @@ pip install --require-hashes --no-deps -r .github/requirements.txt
 python .github/scripts/check_announcements.py --base origin/main
 ```
 
-To preview how a file is posted to each channel:
+To preview how a file is posted to each channel, including the link card for
+Bluesky and LinkedIn:
 
 ```sh
 python .github/scripts/publish_announcements.py --check-only announcements/2026/<MM-DD>-<name>.yaml

@@ -1,4 +1,5 @@
 import json
+from email.message import Message
 from http.client import IncompleteRead
 import os
 from pathlib import Path
@@ -91,6 +92,10 @@ class TestCase(unittest.TestCase):
         patcher = patch("builtins.print")
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Never fetch real pages for link cards.
+        patcher = patch("publish_announcements.link_card", return_value=None)
+        self.link_card = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def plan(self, *args, **kwargs):
         return self.files.plan(*args, **kwargs)
@@ -130,6 +135,10 @@ class LengthTests(TestCase):
         self.assertEqual(check.counted_length(url, "linkedin"), 24)
         self.assertEqual(check.counted_length(url, "bluesky"), len("opentelemetry.io") + 16)
         self.assertEqual(check.counted_length(url, "slack"), 100)
+
+    def test_length_counts_unwrapped_text(self):
+        wrapped = "a" * 149 + "\n  " + "b" * 150
+        self.assertEqual(check.counted_length(wrapped, "bluesky"), 300)
 
     def test_bluesky_short_links_count_in_full_without_scheme(self):
         self.assertEqual(check.counted_length("https://opentelemetry.io/", "bluesky"), 16)
@@ -189,6 +198,13 @@ class PlanTests(TestCase):
         self.assertNotIn("publish_at", items[0, "linkedin"])
         self.assertEqual(items[1, "linkedin"]["publish_at"], "2099-01-01T16:00:00Z")
         self.assertEqual(items[2, "mastodon"]["text"], "Last call")
+
+    def test_wrapped_lines_are_joined(self):
+        content = ("subject: News\ntext: |\n  First line\n  same paragraph.\n\n"
+                   "  List:\n  - one\n    continued\n  2. two\n")
+        for item in self.plan(content=content):
+            self.assertEqual(item["text"],
+                             "First line same paragraph.\n\nList:\n- one continued\n2. two")
 
     def test_images_only_for_buffer_channels(self):
         items = {(item["post"], item["channel"]): item for item in self.plan()}
@@ -452,6 +468,28 @@ class DeliveryTests(TestCase):
         self.assertEqual([item["status"] for item in items], ["drafted", "drafted"])
 
     @patch("publish_announcements.request")
+    def test_link_card_only_without_image_and_fetched_once(self, request):
+        card = {"url": "https://opentelemetry.io/blog/2026/news/", "title": "News"}
+        self.link_card.return_value = card
+        items = [item for item in self.plan(skip=["slack", "groupsio"])
+                 if item["post"] < 2]
+        publish.add_link_cards(items)
+        request.side_effect = [buffer_channel(channel, f"{channel}-id")
+                               for channel in ("bluesky", "mastodon", "linkedin")] + [
+            buffer_post(), buffer_post(), buffer_post(),
+            buffer_post("scheduled"), buffer_post("scheduled"), buffer_post("scheduled"),
+        ]
+        self.assertTrue(publisher().run(items))
+        inputs = {(item["post"], item["channel"]): call.args[1]["variables"]["input"]
+                  for item, call in zip(items, request.call_args_list[3:])}
+        for channel in publish.BUFFER_CHANNELS:
+            self.assertNotIn("metadata", inputs[0, channel])
+        self.assertNotIn("metadata", inputs[1, "mastodon"])
+        for channel in ("bluesky", "linkedin"):
+            self.assertEqual(inputs[1, channel]["metadata"], {channel: {"linkAttachment": card}})
+        self.link_card.assert_called_once_with("https://opentelemetry.io/blog/2026/news/")
+
+    @patch("publish_announcements.request")
     def test_buffer_errors_fail_the_delivery(self, request):
         for error in [
             {"errors": [{"message": "invalid query"}]},
@@ -513,7 +551,7 @@ class DeliveryTests(TestCase):
 
     @patch("publish_announcements.request")
     def test_groupsio_draft_and_publish(self, request):
-        content = SIMPLE + "groupsio: |\n  <script>& news\n  https://opentelemetry.io/x.\n"
+        content = SIMPLE + "groupsio: |\n  <script>& news\n\n  https://opentelemetry.io/x.\n"
         for mode in ["draft", "publish"]:
             with self.subTest(mode=mode):
                 request.reset_mock()
@@ -526,7 +564,7 @@ class DeliveryTests(TestCase):
                 self.assertEqual(calls[1].args[0], "https://lists.cncf.io/api/v1/updatedraft")
                 self.assertEqual(calls[1].args[1]["subject"], "OpenTelemetry news")
                 self.assertEqual(calls[1].args[1]["body"],
-                                 '<p>&lt;script&gt;&amp; news<br>\n<a href="https://opentelemetry.io/x">'
+                                 '<p>&lt;script&gt;&amp; news<br>\n<br>\n<a href="https://opentelemetry.io/x">'
                                  'https://opentelemetry.io/x</a>.</p>')
                 self.assertEqual(len(calls), 2 if mode == "draft" else 3)
                 if mode == "publish":
@@ -621,6 +659,40 @@ class TransportTests(unittest.TestCase):
     def test_redirects_are_rejected(self):
         self.assertIsNone(publish.NoRedirects().redirect_request(None, None, 302, "", {}, "https://other.com"))
 
+    @patch("publish_announcements.urlopen")
+    def test_link_card_from_open_graph_tags(self, urlopen):
+        response = urlopen.return_value.__enter__.return_value
+        response.headers = Message()
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response.geturl.return_value = "https://example.com/blog/post/"
+        response.read.return_value = (
+            b'<html><head><title>Fallback</title><meta property="og:title" content="Post &amp; more">'
+            b'<meta name="description" content="Line one\n  line two">'
+            b'<meta property="og:image" content="/img/card.png"></head></html>'
+        )
+        self.assertEqual(publish.link_card("https://example.com/post"), {
+            "url": "https://example.com/post", "title": "Post & more",
+            "description": "Line one line two",
+            "thumbnail": {"url": "https://example.com/img/card.png"},
+        })
+        response.headers.replace_header("Content-Type", "application/pdf")
+        self.assertIsNone(publish.link_card("https://example.com/post"))
+        urlopen.side_effect = URLError("down")
+        self.assertIsNone(publish.link_card("https://example.com/post"))
+
+    @patch("publish_announcements.urlopen")
+    def test_malformed_image_url_is_omitted(self, urlopen):
+        response = urlopen.return_value.__enter__.return_value
+        response.headers = Message()
+        response.headers["Content-Type"] = "text/html"
+        response.geturl.return_value = "https://example.com/post"
+        response.read.return_value = (
+            b'<meta property="og:title" content="Post">'
+            b'<meta property="og:image" content="https://[broken/card.png">'
+        )
+        self.assertEqual(publish.link_card("https://example.com/post"),
+                         {"url": "https://example.com/post", "title": "Post"})
+
 
 class MainTests(TestCase):
     def run_main(self, args, env=None, config=CONFIG):
@@ -649,6 +721,18 @@ class MainTests(TestCase):
         self.assertIn("first post, slack (general, news)", summary)
         self.assertIn("follow-up 1, linkedin (main) at 2099-01-01T16:00:00Z", summary)
         self.assertIn("<b>Subject:</b> OpenTelemetry news", summary)
+        self.assertIn("<b>Link card:</b> none found for https://opentelemetry.io/blog/2026/news/", summary)
+        request.assert_not_called()
+
+    @patch("publish_announcements.request")
+    def test_check_only_renders_link_cards(self, request):
+        self.link_card.return_value = {
+            "url": "https://opentelemetry.io/blog/2026/news/", "title": "News <b>",
+            "description": "All the news", "thumbnail": {"url": "https://opentelemetry.io/card.png"},
+        }
+        _, summary, _, _ = self.run_main(["--check-only", "--mode", "publish"])
+        self.assertIn("<b>Link card:</b> News &lt;b&gt;\n<b>Card description:</b> All the news\n"
+                      "<b>Card image:</b> https://opentelemetry.io/card.png\n\nReminder", summary)
         request.assert_not_called()
 
     @patch("publish_announcements.request")

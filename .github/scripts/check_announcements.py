@@ -60,6 +60,7 @@ LINK_RULES = {
     "slack": "links count in full",
 }
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+")
+LIST_ITEM = re.compile(r"\s*(?:[-*+•]|\d+[.)])\s")
 URL_TRAILING = ".,;:!?)]}'\""
 LINK_TIMEOUT = 15
 
@@ -263,6 +264,22 @@ def link_length(url, channel):
     return len(url)
 
 
+def unwrap(text):
+    """Join hard-wrapped lines as Markdown does.
+
+    Blank lines separate paragraphs and list items start a new line; any other
+    line break is replaced by a space.
+    """
+    lines = []
+    for line in text.strip().split("\n"):
+        line = line.rstrip()
+        if lines and lines[-1] and line and not LIST_ITEM.match(line):
+            lines[-1] += " " + line.lstrip()
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def counted_length(text, channel):
     def link(match):
         # Punctuation right after a link, like a full stop, isn't part of the
@@ -270,7 +287,7 @@ def counted_length(text, channel):
         url = match.group().rstrip(URL_TRAILING)
         return "x" * link_length(url, channel) + match.group()[len(url):]
 
-    text = URL_PATTERN.sub(link, text.strip())
+    text = URL_PATTERN.sub(link, unwrap(text))
     if channel in UTF16_CHANNELS:
         return len(text.encode("utf-16-le")) // 2
     return len(text)
