@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+
+subject: "New blog post: Deprecating the Collector Batch Processor"
+text: |
+  We are deprecating the Collector batch processor. Batching is now supported
+  directly in exporters. Exporter-level batching becomes the default in
+  v0.171.0 (Feb 2027); remove the batch processor from your pipelines before
+  its removal in v0.177.0.
+
+  Read it: https://opentelemetry.io/blog/2026/collector-batching-migration/
+groupsio: |
+  Hello everyone,
+
+  A new post is up on the OpenTelemetry blog: "Deprecating the Collector Batch
+  Processor".
+
+  We are deprecating the batch processor. Batching is now supported directly in
+  exporters, called exporter-level batching, and a new queue_batch processor
+  replaces the original processor component. Exporter-level batching becomes
+  enabled by default in most exporters in release v0.171.0, planned for
+  February 2027. If your configuration includes the batch processor, you need to
+  remove it from your pipelines before the processor itself is removed in
+  release v0.177.0 (May 2027).
+
+  The post shows how to opt in today and why the batch processor is being
+  replaced.
+
+  Read it: https://opentelemetry.io/blog/2026/collector-batching-migration/
