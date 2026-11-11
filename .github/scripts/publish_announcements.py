@@ -49,7 +49,6 @@ DRAFT_CHANNELS = BUFFER_CHANNELS | {"groupsio"}
 # Mastodon builds its own from the link in the text.
 LINK_CARD_CHANNELS = {"linkedin", "bluesky"}
 LINK_CARD_MAX_BYTES = 1_000_000
-LIST_ITEM = re.compile(r"\s*(?:[-*+•]|\d+[.)])\s")
 MODES = ("check", "draft", "publish")
 MAX_DESTINATIONS = 50
 GROUPSIO_API = "https://lists.cncf.io/api/v1"
@@ -123,20 +122,7 @@ def slack_escape(text):
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def unwrap(text):
-    """Join hard-wrapped lines as Markdown does.
-
-    Blank lines separate paragraphs and list items start a new line; any other
-    line break is replaced by a space.
-    """
-    lines = []
-    for line in text.strip().split("\n"):
-        line = line.rstrip()
-        if lines and lines[-1] and line and not LIST_ITEM.match(line):
-            lines[-1] += " " + line.lstrip()
-        else:
-            lines.append(line)
-    return "\n".join(lines)
+unwrap = check.unwrap
 
 
 class MetaParser(HTMLParser):
@@ -196,9 +182,12 @@ def link_card(url):
         card["description"] = description
     image = meta.get("og:image") or meta.get("og:image:url") or meta.get("twitter:image")
     if image:
-        image = urljoin(final_url, image)
-        if urlsplit(image).scheme == "https":
-            card["thumbnail"] = {"url": image}
+        try:
+            image = urljoin(final_url, image)
+            if urlsplit(image).scheme == "https":
+                card["thumbnail"] = {"url": image}
+        except ValueError:
+            pass
     return card
 
 

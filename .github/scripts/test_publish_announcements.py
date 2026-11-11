@@ -136,6 +136,10 @@ class LengthTests(TestCase):
         self.assertEqual(check.counted_length(url, "bluesky"), len("opentelemetry.io") + 16)
         self.assertEqual(check.counted_length(url, "slack"), 100)
 
+    def test_length_counts_unwrapped_text(self):
+        wrapped = "a" * 149 + "\n  " + "b" * 150
+        self.assertEqual(check.counted_length(wrapped, "bluesky"), 300)
+
     def test_bluesky_short_links_count_in_full_without_scheme(self):
         self.assertEqual(check.counted_length("https://opentelemetry.io/", "bluesky"), 16)
         self.assertEqual(check.counted_length("https://opentelemetry.io/blog/", "bluesky"), 22)
@@ -675,6 +679,19 @@ class TransportTests(unittest.TestCase):
         self.assertIsNone(publish.link_card("https://example.com/post"))
         urlopen.side_effect = URLError("down")
         self.assertIsNone(publish.link_card("https://example.com/post"))
+
+    @patch("publish_announcements.urlopen")
+    def test_malformed_image_url_is_omitted(self, urlopen):
+        response = urlopen.return_value.__enter__.return_value
+        response.headers = Message()
+        response.headers["Content-Type"] = "text/html"
+        response.geturl.return_value = "https://example.com/post"
+        response.read.return_value = (
+            b'<meta property="og:title" content="Post">'
+            b'<meta property="og:image" content="https://[broken/card.png">'
+        )
+        self.assertEqual(publish.link_card("https://example.com/post"),
+                         {"url": "https://example.com/post", "title": "Post"})
 
 
 class MainTests(TestCase):
