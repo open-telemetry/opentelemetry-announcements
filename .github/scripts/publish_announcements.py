@@ -442,9 +442,16 @@ class Publisher:
                     f"{GROUPSIO_API}/postdraft", {"draft_id": created["id"]},
                     headers, form=True, empty_ok=True,
                 )
-                if result is not None:
-                    raise DeliveryError("Groups.io returned an unexpected postdraft response")
-                item["remote_status"] = "submitted"
+                # A 2xx response means the post was accepted. The body isn't
+                # documented, so only an explicit error object counts as failure
+                # and the returned object type is recorded for tracking.
+                kind = api_error_code(result.get("object")) if result else None
+                if kind == "error":
+                    raise DeliveryError(
+                        f"Groups.io rejected the post ({api_error_code(result.get('type'))}); "
+                        "delivery may have occurred; not retried"
+                    )
+                item["remote_status"] = f"submitted:{kind}" if kind else "submitted"
         else:
             raise DeliveryError("Unsupported delivery channel")
 

@@ -572,6 +572,22 @@ class DeliveryTests(TestCase):
                     self.assertTrue(calls[2].args[0].endswith("/postdraft"))
 
     @patch("publish_announcements.request")
+    def test_groupsio_postdraft_response_is_tolerated_and_recorded(self, request):
+        draft = {"object": "draft", "id": 12}
+        for response, status, ok in [
+            ({"object": "post", "id": 5}, "submitted:post", True),
+            (None, "submitted", True),
+            ({"object": "error", "type": "bad_request"}, "draft", False),
+        ]:
+            with self.subTest(response=response):
+                request.side_effect = [draft, draft, response]
+                items = self.plan("publish", SIMPLE, {"groupsio": {"announce": 123}}, only("groupsio"))
+                self.assertEqual(publisher().run(items), ok)
+                self.assertEqual(items[0]["remote_status"], status)
+                if not ok:
+                    self.assertIn("bad_request", items[0]["error"])
+
+    @patch("publish_announcements.request")
     def test_failed_groupsio_update_leaves_draft_id_and_never_posts(self, request):
         request.side_effect = [{"object": "draft", "id": 12}, {"object": "error", "type": "bad_request"}]
         items = self.plan(targets={"groupsio": {"announce": 123}}, skip=only("groupsio"), content=SIMPLE)
