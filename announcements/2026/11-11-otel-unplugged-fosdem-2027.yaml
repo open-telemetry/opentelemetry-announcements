@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+
+image: otel-unplugged-eu-2027.png
+alt: OTel Unplugged EU 2027 logo
+
+subject: "OTel Unplugged EU at FOSDEM 2027"
+text: |
+  OpenTelemetry is returning to FOSDEM! OTel Unplugged, an unconference and
+  project roadmapping session, is back on Monday, February 1st, 2027, the day
+  after FOSDEM, in Brussels.
+
+  Read it: https://opentelemetry.io/blog/2026/otel-unplugged-fosdem-2027/
+groupsio: |
+  Hello everyone,
+
+  OpenTelemetry is returning to FOSDEM! OTel Unplugged EU will be happening on
+  Monday, February 1st, 2027, the day after FOSDEM, in the Sparks meeting hall
+  in central Brussels.
+
+  OTel Unplugged is an OpenTelemetry unconference and project roadmapping
+  session. Instead of a speaker track, attendees pick the topics for a series
+  of breakout sessions. If you are an end user, this is a great opportunity to
+  connect with maintainers and other users to get your questions answered and
+  give feedback to the project. If you are a maintainer or contributor, this is
+  your chance to connect with your users face to face. We will end with a
+  project roadmapping session to give suggestions and vote on priorities for
+  the next year.
+
+  Register: https://events.humanitix.com/otel-unplugged-2027
+  Sponsorship: unplugged@opentelemetry.io
+
+  Read it: https://opentelemetry.io/blog/2026/otel-unplugged-fosdem-2027/
