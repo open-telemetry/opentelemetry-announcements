@@ -96,7 +96,8 @@ mode and default to `check`.
 Every delivery uploads a `report.json` artifact with the status of each post,
 channel and destination (`preview`, `drafted`, `scheduled`, `submitted`,
 `failed` or `pending`), the IDs the services returned and a short error. The
-job summary shows the counts and the rendered posts.
+job summary shows the counts, the status of each delivery with the status the
+service returned, and the rendered posts.
 
 All files, destinations and secrets are validated before the first request,
 and every Buffer channel is checked to belong to the service it is configured

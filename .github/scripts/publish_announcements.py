@@ -75,7 +75,12 @@ class NoRedirects(HTTPRedirectHandler):
         return None
 
 
-def request(url, payload, headers=None, *, form=False, empty_ok=False, raw=False):
+def request(url, payload, headers=None, *, form=False, lenient=False, raw=False):
+    """POST payload and return the JSON object from the response.
+
+    With lenient, any 2xx body is accepted: a JSON object is returned and
+    anything else (empty, invalid JSON, null, a list) returns None.
+    """
     data = urlencode(payload).encode() if form else json.dumps(payload).encode()
     headers = {
         "Content-Type": "application/x-www-form-urlencoded" if form else "application/json",
@@ -102,13 +107,15 @@ def request(url, payload, headers=None, *, form=False, empty_ok=False, raw=False
         ) from exc
     if raw:
         return body.decode("utf-8", errors="replace")
-    if not body and empty_ok:
-        return None
     try:
         result = json.loads(body)
     except (ValueError, UnicodeDecodeError) as exc:
+        if lenient:
+            return None
         raise DeliveryError("API returned an invalid JSON response; not retried") from exc
     if not isinstance(result, dict):
+        if lenient:
+            return None
         raise DeliveryError("API returned an unexpected response object")
     return result
 
@@ -440,11 +447,12 @@ class Publisher:
             if not draft:
                 result = request(
                     f"{GROUPSIO_API}/postdraft", {"draft_id": created["id"]},
-                    headers, form=True, empty_ok=True,
+                    headers, form=True, lenient=True,
                 )
                 # A 2xx response means the post was accepted. The body isn't
-                # documented, so only an explicit error object counts as failure
-                # and the returned object type is recorded for tracking.
+                # documented, so any body is accepted, only an explicit error
+                # object counts as failure and the returned object type is
+                # recorded for tracking.
                 kind = api_error_code(result.get("object")) if result else None
                 if kind == "error":
                     raise DeliveryError(
@@ -652,10 +660,17 @@ def deliver(args, report):
         summary.append(f"- {status}: {count}")
     if "error" in result:
         summary.extend(["", result["error"]])
-    for item in result["deliveries"]:
-        if item["status"] == "failed":
-            summary.append(f"- {item['file']}, post {item['post']}, {item['channel']} "
-                           f"{item['destination']}: {item.get('error', '')}")
+    details = [item for item in result["deliveries"] if item["status"] not in ("preview", "pending")]
+    if details:
+        summary.append("")
+    for item in details:
+        line = (f"- {item['file']}, post {item['post']}, {item['channel']} "
+                f"{item['destination']}: {item['status']}")
+        if item.get("remote_status"):
+            line += f" (remote: {item['remote_status']})"
+        if item.get("error"):
+            line += f": {item['error']}"
+        summary.append(line)
     summary.extend(rendered_summary(result["deliveries"]))
     if output:
         summary.extend(["", "See the report artifact for destinations and delivery IDs."])
