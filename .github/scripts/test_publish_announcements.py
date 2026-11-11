@@ -568,8 +568,35 @@ class DeliveryTests(TestCase):
                                  'https://opentelemetry.io/x</a>.</p>')
                 self.assertEqual(len(calls), 2 if mode == "draft" else 3)
                 if mode == "publish":
-                    self.assertTrue(calls[2].kwargs["empty_ok"])
+                    self.assertTrue(calls[2].kwargs["lenient"])
                     self.assertTrue(calls[2].args[0].endswith("/postdraft"))
+
+    @patch("publish_announcements.request")
+    def test_groupsio_postdraft_response_is_tolerated_and_recorded(self, request):
+        draft = {"object": "draft", "id": 12}
+        for response, status, ok in [
+            ({"object": "post", "id": 5}, "submitted:post", True),
+            (None, "submitted", True),
+            ({"object": "error", "type": "bad_request"}, "draft", False),
+        ]:
+            with self.subTest(response=response):
+                request.side_effect = [draft, draft, response]
+                items = self.plan("publish", SIMPLE, {"groupsio": {"announce": 123}}, only("groupsio"))
+                self.assertEqual(publisher().run(items), ok)
+                self.assertEqual(items[0]["remote_status"], status)
+                if not ok:
+                    self.assertIn("bad_request", items[0]["error"])
+
+    @patch("publish_announcements.build_opener")
+    def test_groupsio_postdraft_accepts_non_object_bodies(self, opener):
+        response = opener.return_value.open.return_value.__enter__.return_value
+        draft = b'{"object": "draft", "id": 12}'
+        for body in [b"", b"null", b"[]", b"not json"]:
+            with self.subTest(body=body):
+                response.read.side_effect = [draft, draft, body]
+                items = self.plan("publish", SIMPLE, {"groupsio": {"announce": 123}}, only("groupsio"))
+                self.assertTrue(publisher().run(items))
+                self.assertEqual(items[0]["remote_status"], "submitted")
 
     @patch("publish_announcements.request")
     def test_failed_groupsio_update_leaves_draft_id_and_never_posts(self, request):
@@ -626,11 +653,16 @@ class TransportTests(unittest.TestCase):
                 self.assertEqual("may have occurred" in str(failure.exception), uncertain)
 
     @patch("publish_announcements.build_opener")
-    def test_empty_response_only_allowed_explicitly(self, opener):
-        opener.return_value.open.return_value.__enter__.return_value.read.return_value = b""
-        self.assertIsNone(publish.request("https://example.com", {}, empty_ok=True))
-        with self.assertRaises(publish.DeliveryError):
-            publish.request("https://example.com", {})
+    def test_lenient_accepts_any_2xx_body(self, opener):
+        response = opener.return_value.open.return_value.__enter__.return_value
+        for body in [b"", b"not json", b"[]", b"null"]:
+            with self.subTest(body=body):
+                response.read.return_value = body
+                self.assertIsNone(publish.request("https://example.com", {}, lenient=True))
+                with self.assertRaises(publish.DeliveryError):
+                    publish.request("https://example.com", {})
+        response.read.return_value = b'{"object": "post"}'
+        self.assertEqual(publish.request("https://example.com", {}, lenient=True), {"object": "post"})
 
     @patch("publish_announcements.build_opener")
     def test_invalid_response_shapes_are_explicit_errors(self, opener):
@@ -768,6 +800,20 @@ class MainTests(TestCase):
         self.assertNotIn("latest news", json.dumps(report))
         self.assertIn("preview: 11", summary)
         request.assert_not_called()
+
+    def test_summary_lists_delivery_and_remote_status(self):
+        def run(_, plan, on_progress=None):
+            for item in plan:
+                item["status"] = "submitted"
+            plan[0]["status"], plan[0]["error"] = "failed", "Groups.io rejected the post"
+            plan[1]["remote_status"] = "submitted:post"
+            return False
+
+        with patch.object(publish.Publisher, "run", run):
+            code, summary, _, _ = self.run_main(["--mode", "publish"])
+        self.assertEqual(code, 1)
+        self.assertIn(": failed: Groups.io rejected the post", summary)
+        self.assertIn(": submitted (remote: submitted:post)", summary)
 
     @patch("publish_announcements.request")
     def test_missing_secrets_fail_with_report(self, request):
