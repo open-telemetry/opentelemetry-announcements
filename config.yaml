@@ -5,7 +5,7 @@
 
 # check (preview only), draft (drafts in Buffer and Groups.io, Slack previewed
 # only) or publish.
-mode: draft
+mode: publish
 
 # Destinations per channel, by name. An announcement can skip a channel
 # (skip: [linkedin]) or a single destination (skip: [slack/otel-announcements]).
