@@ -10,15 +10,16 @@ through a Workflow Builder webhook, and to the mailing list through the
 Groups.io API. Follow-ups are scheduled in Buffer at their publish_at time.
 
 Modes:
-  check    validate and preview only; no requests and no credentials
+  check    validate and preview only; no API requests and no credentials
   draft    create drafts in Buffer and Groups.io; Slack is previewed only
   publish  send the first post now and schedule the follow-ups
 
 The mode and the destinations come from config.yaml; --mode overrides the mode.
 With --check-only, files are validated and previewed for the mode without any
-requests. Credentials come from BUFFER_API_KEY, SLACK_WEBHOOK_URL and
-GROUPSIO_API_KEY. Writes are never retried; with --report, a report of every
-delivery is written to DIR.
+API requests. Linked pages are fetched to build the link previews (link cards)
+for Bluesky and LinkedIn posts without an image. Credentials come from
+BUFFER_API_KEY, SLACK_WEBHOOK_URL and GROUPSIO_API_KEY. Writes are never
+retried; with --report, a report of every delivery is written to DIR.
 """
 
 import argparse
@@ -31,9 +32,10 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from jsonschema import Draft202012Validator
 from ruamel.yaml.error import MarkedYAMLError
@@ -43,6 +45,11 @@ import check_announcements as check
 ROOT = check.ROOT
 BUFFER_CHANNELS = {"linkedin", "bluesky", "mastodon"}
 DRAFT_CHANNELS = BUFFER_CHANNELS | {"groupsio"}
+# Buffer only shows a link card on these networks when the post brings one;
+# Mastodon builds its own from the link in the text.
+LINK_CARD_CHANNELS = {"linkedin", "bluesky"}
+LINK_CARD_MAX_BYTES = 1_000_000
+LIST_ITEM = re.compile(r"\s*(?:[-*+•]|\d+[.)])\s")
 MODES = ("check", "draft", "publish")
 MAX_DESTINATIONS = 50
 GROUPSIO_API = "https://lists.cncf.io/api/v1"
@@ -116,6 +123,92 @@ def slack_escape(text):
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def unwrap(text):
+    """Join hard-wrapped lines as Markdown does.
+
+    Blank lines separate paragraphs and list items start a new line; any other
+    line break is replaced by a space.
+    """
+    lines = []
+    for line in text.strip().split("\n"):
+        line = line.rstrip()
+        if lines and lines[-1] and line and not LIST_ITEM.match(line):
+            lines[-1] += " " + line.lstrip()
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+class MetaParser(HTMLParser):
+    """Collect the <meta> tags and the <title> of a page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.meta = {}
+        self.title = ""
+        self.in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "meta":
+            key = (attrs.get("property") or attrs.get("name") or "").strip().lower()
+            content = (attrs.get("content") or "").strip()
+            if key and content:
+                self.meta.setdefault(key, content)
+        elif tag == "title":
+            self.in_title = True
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.in_title:
+            self.title += data
+
+
+def link_card(url):
+    """Return a Buffer linkAttachment built from the page's Open Graph tags, or None."""
+    try:
+        with urlopen(Request(url, headers={"User-Agent": "opentelemetry-announcements"}),
+                     timeout=check.LINK_TIMEOUT) as response:
+            if response.headers.get_content_type() != "text/html":
+                return None
+            body = response.read(LINK_CARD_MAX_BYTES)
+            charset = response.headers.get_content_charset() or "utf-8"
+            final_url = response.geturl()
+        try:
+            page = body.decode(charset, errors="replace")
+        except LookupError:
+            page = body.decode("utf-8", errors="replace")
+        parser = MetaParser()
+        parser.feed(page)
+    except (ValueError, URLError, TimeoutError, OSError, HTTPException):
+        return None
+    meta = {key: " ".join(value.split()) for key, value in parser.meta.items()}
+    title = meta.get("og:title") or meta.get("twitter:title") or " ".join(parser.title.split())
+    if not title:
+        return None
+    card = {"url": url, "title": title}
+    description = (meta.get("og:description") or meta.get("twitter:description")
+                   or meta.get("description"))
+    if description:
+        card["description"] = description
+    image = meta.get("og:image") or meta.get("og:image:url") or meta.get("twitter:image")
+    if image:
+        image = urljoin(final_url, image)
+        if urlsplit(image).scheme == "https":
+            card["thumbnail"] = {"url": image}
+    return card
+
+
+def warning(message):
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning::{check.escape(message)}")
+    else:
+        print(f"warning: {message}", file=sys.stderr)
+
+
 def groupsio_html(text):
     """Escape the text for a Groups.io message body and turn links into anchors."""
     parts = []
@@ -186,7 +279,7 @@ def build_plan(announcements, targets, mode, *, image_base=None, root=None):
                 item = {
                     "file": display(path, root), "post": index, "channel": channel,
                     "destination": name, "target": target, "action": action,
-                    "text": post.get(channel, post["text"]).strip(),
+                    "text": unwrap(post.get(channel, post["text"])),
                     "status": "pending",
                 }
                 if "publish_at" in post:
@@ -204,6 +297,28 @@ def build_plan(announcements, targets, mode, *, image_base=None, root=None):
     if len(plan) > MAX_DESTINATIONS:
         raise DeliveryError(f"At most {MAX_DESTINATIONS} deliveries are allowed per run")
     return plan
+
+
+def add_link_cards(plan):
+    """Add the link card for the first link to Bluesky and LinkedIn posts without an image.
+
+    Buffer rejects a link card next to an image. Each page is fetched once.
+    """
+    cards = {}
+    for item in plan:
+        if item["channel"] not in LINK_CARD_CHANNELS or "image" in item:
+            continue
+        match = check.URL_PATTERN.search(item["text"])
+        if not match:
+            continue
+        url = match.group().rstrip(check.URL_TRAILING)
+        if url not in cards:
+            cards[url] = link_card(url)
+            if not cards[url]:
+                warning(f"No link preview found for {url}; posting without one")
+        item["link_url"] = url
+        if cards[url]:
+            item["link_card"] = cards[url]
 
 
 class Publisher:
@@ -276,6 +391,8 @@ class Publisher:
                 post_input["assets"] = [{"image": {
                     "url": item["image_url"], "metadata": {"altText": item["alt"]},
                 }}]
+            elif "link_card" in item:
+                post_input["metadata"] = {channel: {"linkAttachment": item["link_card"]}}
             data = self.buffer(
                 "mutation($input: CreatePostInput!) { createPost(input: $input) "
                 "{ ... on PostActionSuccess { post { id status } } "
@@ -415,6 +532,17 @@ def rendered_summary(plan):
             extra += f"<b>Subject:</b> {html.escape(item['subject'])}\n"
         if "image" in item:
             extra += f"<b>Image:</b> {html.escape(item['image'])} ({html.escape(item['alt'])})\n"
+        if "link_card" in item:
+            card = item["link_card"]
+            extra += f"<b>Link card:</b> {html.escape(card['title'])}\n"
+            if "description" in card:
+                extra += f"<b>Card description:</b> {html.escape(card['description'])}\n"
+            if "thumbnail" in card:
+                extra += f"<b>Card image:</b> {html.escape(card['thumbnail']['url'])}\n"
+        elif "link_url" in item:
+            extra += f"<b>Link card:</b> none found for {html.escape(item['link_url'])}\n"
+        if extra:
+            extra += "\n"
         lines.append(
             f"<details><summary>{html.escape(name)}: {label}, {channel} ({html.escape(to)}){when}</summary>"
             f"<pre>{extra}{html.escape(item['text'])}</pre></details>"
@@ -465,11 +593,13 @@ def prepare(args, report, mode, targets):
     elif args.check_only:
         # Previews never send anything, so local runs can use local image paths.
         image_base = ROOT.as_uri() + "/"
-    return paths, build_plan(announcements, targets, mode, image_base=image_base)
+    plan = build_plan(announcements, targets, mode, image_base=image_base)
+    add_link_cards(plan)
+    return paths, plan
 
 
 def check_only(args, report):
-    """Validate and render without credentials or requests."""
+    """Validate and render without credentials or API requests."""
     summary = ["## Announcement check", ""]
     try:
         mode, targets = load_config(args, report)
@@ -543,7 +673,7 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--mode", choices=MODES, help="overrides the mode in config.yaml")
     parser.add_argument("--check-only", action="store_true",
-                        help="validate and preview for MODE without any requests")
+                        help="validate and preview for MODE without any API requests")
     parser.add_argument("--since", help="also publish files under announcements/ added since this git ref")
     parser.add_argument("--report", help="directory for report.json")
     parser.add_argument("files", nargs="*")
