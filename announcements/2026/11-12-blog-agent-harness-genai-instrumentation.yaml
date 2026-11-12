@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+subject: 'New on the OpenTelemetry blog: Building an Agent Harness for OTel Instrumentation with GenAI Semantic Conventions and Weaver'
+text: |-
+  We tested whether a team of agents can instrument GenAI frameworks. They implement against the GenAI semantic conventions, and Weaver live-check validates the telemetry they emit. What worked, what didn't, and what it means for the conventions.
+
+  https://opentelemetry.io/blog/2026/agent-harness-genai-instrumentation/
