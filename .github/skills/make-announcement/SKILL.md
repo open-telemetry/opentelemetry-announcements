@@ -54,6 +54,11 @@ first link's page title, description and preview image. An `image` (with
 `alt`) replaces that card, so add one only when it shows more than the linked
 page's own preview, for example a speaker card or a chart.
 
+Slack `#opentelemetry` is opt-in (`include: [slack/opentelemetry]`) and
+reserved for important and critical announcements (GC elections, security
+updates, major announcements). Only include it when the announcement clearly
+is one of them, and tell the user why.
+
 ## 3. Validate and open the PR
 
 ```sh

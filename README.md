@@ -20,16 +20,33 @@ every key.
 | --- | ------- |
 | `text` | Text of the first post, sent to every destination when the pull request is merged. Write links inline. As in Markdown, wrapped lines are joined into one line; separate paragraphs with a blank line. Lines that start a list item (`-`, `*`, `1.`) stay on their own line. |
 | `subject` | Subject of the mailing list email. Required unless `groupsio` is skipped. |
-| `skip` | Channels or destinations the first post is not sent to: a channel (`bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio`) or a channel and the name of a destination in [`config.yaml`](config.yaml) (for example `slack/otel-announcements`). |
+| `skip` | Channels or destinations the first post is not sent to: a channel (`bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio`) or a channel and the name of a destination in [`config.yaml`](config.yaml) (for example `slack/otel-social`). |
+| `include` | Opt-in destinations the first post is also sent to, for example `slack/opentelemetry`. See [Opt-in destinations](#opt-in-destinations). |
 | `bluesky`, `mastodon`, `linkedin`, `slack`, `groupsio` | Text for one channel, instead of `text`. |
 | `image`, `alt` | Image file next to the announcement and its alternative text. Posted to Bluesky, Mastodon and LinkedIn. Without an image, Bluesky and LinkedIn posts get a link preview built from the first link's Open Graph tags; Mastodon builds its own. |
-| `follow_ups` | Later posts with a `publish_at` time (for example `2026-11-05T16:00:00Z`), scheduled in Buffer. Bluesky, Mastodon and LinkedIn only; each can have its own `skip`. |
+| `follow_ups` | Later posts with a `publish_at` time (for example `2026-11-05T16:00:00Z`), scheduled in Buffer. Bluesky, Mastodon and LinkedIn only; each can have its own `skip` and `include`. |
 
 For example, to leave out LinkedIn and one of the Slack channels:
 
 ```yaml
-skip: [linkedin, slack/otel-announcements]
+skip: [linkedin, slack/otel-social]
 ```
+
+### Opt-in destinations
+
+Some destinations only get announcements that ask for them with `include`.
+The Slack channel `#opentelemetry` is one of them: it is reserved for important
+and critical announcements, such as Governance Committee elections, security
+updates and major announcements. Everything else goes to `#otel-announcements`
+and [`#otel-social`](https://cloud-native.slack.com/archives/C03ULK66M25).
+
+```yaml
+include: [slack/opentelemetry]
+```
+
+Including an opt-in destination shows its note from
+[`config.yaml`](config.yaml) as a warning in the check, so reviewers can
+confirm that the announcement belongs there.
 
 Every pull request is checked automatically:
 
@@ -38,7 +55,8 @@ Every pull request is checked automatically:
 | Structure against the schema | all files | error |
 | Length per channel as Buffer counts it: Bluesky 300 (links count as their host plus up to 16 characters), Mastodon 500 (links count as 23, most emoji as 2), LinkedIn 3,000 (links count as 24, most emoji as 2), Slack 40,000 | all files | error |
 | Image file exists | all files | error |
-| Skipped destinations exist in `config.yaml`, and at least one destination is left | all files | error |
+| Skipped and included destinations exist in `config.yaml`, included ones are opt-in and not skipped, and at least one destination is left | all files | error |
+| Opt-in destination included | all files | warning |
 | `publish_at` is in the future | announcements added or changed in the pull request | error |
 | Links are reachable | announcements added or changed in the pull request | warning |
 
@@ -69,7 +87,8 @@ When a pull request that adds a file under `announcements/` is merged, the
    job has no access to the credentials.
 2. Waits for a maintainer to approve the `announcements` environment.
 3. Delivers the first post to every destination in [`config.yaml`](config.yaml)
-   that the announcement doesn't skip, and schedules the follow-ups in Buffer:
+   that the announcement doesn't skip, plus the opt-in destinations it
+   includes, and schedules the follow-ups in Buffer:
 
    | Channel | Delivered through | Image | Follow-ups |
    | ------- | ----------------- | ----- | ---------- |
@@ -128,13 +147,18 @@ targets:
   bluesky:
     opentelemetry: "BUFFER_CHANNEL_ID"
   slack:
-    opentelemetry: "C0123456789"
     otel-announcements: "C0123456789"
+    opentelemetry:
+      id: "C0123456789"
+      opt_in: Only for important and critical announcements.
   groupsio:
     cncf-opentelemetry-announce: 12345
 ```
 
-Each destination has a name, which announcements use to skip it. Buffer
+Each destination has a name, which announcements use to skip it. A
+destination with an `id` and an `opt_in` note is opt-in: announcements are
+only sent to it when they include it, and the note is shown as a warning when
+they do. Buffer
 destinations are channel IDs (not organization IDs), one per service. Slack
 destinations are channel IDs, not names: the last part of the channel's link.
 Groups.io destinations are group IDs on `lists.cncf.io`. Every channel that an

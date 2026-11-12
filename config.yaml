@@ -8,7 +8,10 @@
 mode: publish
 
 # Destinations per channel, by name. An announcement can skip a channel
-# (skip: [linkedin]) or a single destination (skip: [slack/otel-announcements]).
+# (skip: [linkedin]) or a single destination (skip: [slack/otel-social]).
+# Opt-in destinations, which have an id and an opt_in note, only get
+# announcements that include them (include: [slack/opentelemetry]); the note is
+# shown as a warning when they do.
 targets:
   # Buffer channel IDs
   bluesky:
@@ -19,8 +22,14 @@ targets:
     opentelemetry: "64834470c20da04cd12c179e"
   # Slack channel IDs in the CNCF workspace
   slack:
-    opentelemetry: "CJFCJHG4Q"
     otel-announcements: "C049G9W5NQ7"
+    otel-social: "C03ULK66M25"
+    opentelemetry:
+      id: "CJFCJHG4Q"
+      opt_in: >-
+        #opentelemetry is reserved for important and critical announcements,
+        such as Governance Committee elections, security updates and major
+        announcements. Make sure this announcement is one of them.
   # Group IDs on lists.cncf.io
   groupsio:
     cncf-opentelemetry-announce: 140639

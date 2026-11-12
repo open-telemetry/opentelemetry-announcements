@@ -7,8 +7,9 @@ Without FILE arguments, checks announcements/**/*.yaml and examples/**/*.yaml.
 
 config.yaml is checked against schema/config.schema.json. Every file is
 checked against schema/announcement.schema.json, against the channels' length
-limits, for missing image files, and for skipped destinations that are not in
-config.yaml. Files that are new or
+limits, for missing image files, and for skipped or included destinations that
+are not in config.yaml. Including an opt-in destination prints its note as a
+warning. Files that are new or
 changed are also checked for publish_at times in the past (error) and for
 links that don't return 200 (warning). A file counts as new or changed when it
 is passed as an argument, or when it differs from REF (with --base). Files in
@@ -153,7 +154,11 @@ def describe(error):
     if error.validator in ("pattern", "not") and len(path) > 1 and path[-2] == "skip":
         channels = SCHEDULED_CHANNELS if "follow_ups" in path else CHANNELS
         return [(path, f"'{error.instance}' must be a channel ({', '.join(channels)}) or "
-                       "a channel and destination from config.yaml, for example slack/opentelemetry")]
+                       "a channel and destination from config.yaml, for example slack/otel-social")]
+    if error.validator in ("pattern", "not") and len(path) > 1 and path[-2] == "include":
+        channels = SCHEDULED_CHANNELS if "follow_ups" in path else CHANNELS
+        return [(path, f"'{error.instance}' must be a channel ({', '.join(channels)}) and an "
+                       "opt-in destination from config.yaml, for example slack/opentelemetry")]
     if error.validator == "pattern" and path and path[-1] == "image":
         return [(path, f"'{error.instance}' must be a relative path to a "
                        ".png, .jpg, .gif or .webp file next to the announcement")]
@@ -184,13 +189,28 @@ def posts(data):
         yield ["follow_ups", index], follow_up, [c for c in SCHEDULED_CHANNELS if c not in skip]
 
 
+def target_id(target):
+    """Return the ID of a destination in config.yaml, which may be opt-in."""
+    return target["id"] if isinstance(target, dict) else target
+
+
+def opt_in_note(target):
+    """Return the note of an opt-in destination, or None."""
+    return target.get("opt_in") if isinstance(target, dict) else None
+
+
 def destinations(post, channels, targets):
-    """Yield (channel, name, target) for every destination the post is sent to."""
+    """Yield (channel, name, target ID) for every destination the post is sent to.
+
+    Opt-in destinations are only sent to when the post includes them.
+    """
     skip = post.get("skip", [])
+    include = post.get("include", [])
     for channel in channels:
         for name, target in targets.get(channel, {}).items():
-            if f"{channel}/{name}" not in skip:
-                yield channel, name, target
+            entry = f"{channel}/{name}"
+            if entry not in skip and (entry in include or not opt_in_note(target)):
+                yield channel, name, target_id(target)
 
 
 def load_config(report, path=None):
@@ -212,6 +232,7 @@ def load_config(report, path=None):
         for channel, named in config["targets"].items():
             seen = set()
             for name, target in named.items():
+                target = target_id(target)
                 key = ["targets", channel, name]
                 if str(target).lower() in seen:
                     report(path, line_of(config, key),
@@ -227,16 +248,38 @@ def load_config(report, path=None):
 
 
 def check_destinations(path, data, targets, report):
-    """Check that skipped destinations exist and that every post has a destination."""
+    """Check skipped and included destinations and that every post has a destination.
+
+    Including an opt-in destination is reported as a warning with its note.
+    """
+    def unknown(key, channel, name):
+        known = ", ".join(targets.get(channel, {})) or "none"
+        report(path, line_of(data, key),
+               f"{location(key)}: config.yaml has no {channel} destination "
+               f"named '{name}' (configured: {known})")
+
     for post_path, post, channels in posts(data):
-        for index, entry in enumerate(post.get("skip", [])):
+        skip = post.get("skip", [])
+        for index, entry in enumerate(skip):
             channel, _, name = entry.partition("/")
             if name and name not in targets.get(channel, {}):
-                key = post_path + ["skip", index]
-                known = ", ".join(targets.get(channel, {})) or "none"
+                unknown(post_path + ["skip", index], channel, name)
+        for index, entry in enumerate(post.get("include", [])):
+            channel, _, name = entry.partition("/")
+            key = post_path + ["include", index]
+            target = targets.get(channel, {}).get(name)
+            if target is None:
+                unknown(key, channel, name)
+            elif not opt_in_note(target):
                 report(path, line_of(data, key),
-                       f"{location(key)}: config.yaml has no {channel} destination "
-                       f"named '{name}' (configured: {known})")
+                       f"{location(key)}: {entry} is not opt-in; it is sent to unless skipped")
+            elif channel not in channels or entry in skip:
+                report(path, line_of(data, key),
+                       f"{location(key)}: {entry} is both included and skipped")
+            else:
+                report(path, line_of(data, key),
+                       f"{location(key)}: {entry} is opt-in: {' '.join(opt_in_note(target).split())}",
+                       level="warning")
         missing = [channel for channel in channels if not targets.get(channel)]
         if missing:
             report(path, line_of(data, post_path),

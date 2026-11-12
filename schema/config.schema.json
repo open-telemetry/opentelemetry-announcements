@@ -14,7 +14,7 @@
     "targets": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Destinations per channel, by name. Announcements can skip a channel or a single destination by its name.",
+      "description": "Destinations per channel, by name. Announcements can skip a channel or a single destination by its name. A destination is an ID, or an object with the ID and an opt_in note for destinations that only get announcements that include them.",
       "properties": {
         "bluesky": { "$ref": "#/$defs/buffer" },
         "mastodon": { "$ref": "#/$defs/buffer" },
@@ -22,12 +22,22 @@
         "slack": {
           "$ref": "#/$defs/destinations",
           "description": "Slack channel IDs (not names), for example C0123456789.",
-          "additionalProperties": { "$ref": "#/$defs/id", "pattern": "^[CG][A-Z0-9]+$" }
+          "additionalProperties": {
+            "anyOf": [
+              { "$ref": "#/$defs/slackId" },
+              { "$ref": "#/$defs/optIn", "properties": { "id": { "$ref": "#/$defs/slackId" } } }
+            ]
+          }
         },
         "groupsio": {
           "$ref": "#/$defs/destinations",
           "description": "Group IDs on lists.cncf.io.",
-          "additionalProperties": { "type": "integer", "minimum": 1 }
+          "additionalProperties": {
+            "anyOf": [
+              { "$ref": "#/$defs/groupId" },
+              { "$ref": "#/$defs/optIn", "properties": { "id": { "$ref": "#/$defs/groupId" } } }
+            ]
+          }
         }
       }
     }
@@ -46,7 +56,29 @@
     "buffer": {
       "$ref": "#/$defs/destinations",
       "description": "Buffer channel IDs (not organization IDs), one per service.",
-      "additionalProperties": { "$ref": "#/$defs/id", "pattern": "^[A-Za-z0-9_-]+$" }
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/bufferId" },
+          { "$ref": "#/$defs/optIn", "properties": { "id": { "$ref": "#/$defs/bufferId" } } }
+        ]
+      }
+    },
+    "bufferId": { "$ref": "#/$defs/id", "pattern": "^[A-Za-z0-9_-]+$" },
+    "slackId": { "$ref": "#/$defs/id", "pattern": "^[CG][A-Z0-9]+$" },
+    "groupId": { "type": "integer", "minimum": 1 },
+    "optIn": {
+      "type": "object",
+      "description": "An opt-in destination: announcements are only sent to it when they include it.",
+      "additionalProperties": false,
+      "required": ["id", "opt_in"],
+      "properties": {
+        "id": { "description": "The ID of the destination." },
+        "opt_in": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "What the destination is for. Shown as a warning when an announcement includes it."
+        }
+      }
     }
   }
 }
