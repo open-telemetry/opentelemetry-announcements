@@ -182,13 +182,14 @@ python -m unittest discover -s .github/scripts -p 'test_*.py'
 
 These are the members of [@open-telemetry/social-media-maintainers][] (members-only):
 
-- [Patrice Chalin](https://github.com/chalin), CNCF
+- [Adriana Villela](https://github.com/avillela), Dynatrace
+- [Austin Parker](https://github.com/austinlparker)
 - [Daniel Gomez Blanco](https://github.com/danielgblanco), New Relic
-- [Tiffany Hrabusa](https://github.com/tiffany76), Grafana Labs
+- [Marylia Gutierrez](https://github.com/maryliag), Grafana Labs
+- [Patrice Chalin](https://github.com/chalin), CNCF
 - [Reese Lee](https://github.com/reese-lee), New Relic
 - [Severin Neumann](https://github.com/svrnm), Bronto
-- [Austin Parker](https://github.com/austinlparker)
-- [Adriana Villela](https://github.com/avillela), Dynatrace
+- [Tiffany Hrabusa](https://github.com/tiffany76), Grafana Labs
 
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
