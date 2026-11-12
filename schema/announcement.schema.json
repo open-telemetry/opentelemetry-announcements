@@ -25,6 +25,13 @@
       "minItems": 1,
       "uniqueItems": true
     },
+    "include": {
+      "type": "array",
+      "description": "Opt-in destinations from config.yaml (for example slack/opentelemetry) that the first post is also sent to. Opt-in destinations are reserved for specific announcements; check their opt_in note in config.yaml.",
+      "items": { "$ref": "#/$defs/includeEntry" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
     "image": { "$ref": "#/$defs/image" },
     "alt": { "$ref": "#/$defs/alt" },
     "bluesky": { "$ref": "#/$defs/text", "description": "Text of the first post on Bluesky." },
@@ -60,6 +67,18 @@
       "type": "string",
       "description": "A channel, or a channel and the name of one of its destinations in config.yaml.",
       "pattern": "^(bluesky|mastodon|linkedin|slack|groupsio)(/[a-z0-9][a-z0-9-]*)?$",
+      "not": { "pattern": "\\s" }
+    },
+    "includeEntry": {
+      "type": "string",
+      "description": "A channel and the name of one of its opt-in destinations in config.yaml.",
+      "pattern": "^(bluesky|mastodon|linkedin|slack|groupsio)/[a-z0-9][a-z0-9-]*$",
+      "not": { "pattern": "\\s" }
+    },
+    "scheduledIncludeEntry": {
+      "type": "string",
+      "description": "A channel that supports scheduling and the name of one of its opt-in destinations in config.yaml.",
+      "pattern": "^(bluesky|mastodon|linkedin)/[a-z0-9][a-z0-9-]*$",
       "not": { "pattern": "\\s" }
     },
     "scheduledSkipEntry": {
@@ -100,6 +119,13 @@
           "type": "array",
           "description": "Channels or destinations that this follow-up is not sent to. By default, it is sent to every Bluesky, Mastodon and LinkedIn destination.",
           "items": { "$ref": "#/$defs/scheduledSkipEntry" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "include": {
+          "type": "array",
+          "description": "Opt-in Bluesky, Mastodon or LinkedIn destinations from config.yaml that this follow-up is also sent to.",
+          "items": { "$ref": "#/$defs/scheduledIncludeEntry" },
           "minItems": 1,
           "uniqueItems": true
         },

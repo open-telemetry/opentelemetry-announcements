@@ -31,7 +31,8 @@ follow_ups:
 SIMPLE = "subject: OpenTelemetry news\ntext: Simple news\n"
 TARGETS = {
     "linkedin": {"main": "linkedin-id"}, "bluesky": {"main": "bluesky-id"},
-    "mastodon": {"main": "mastodon-id"}, "slack": {"general": "C123", "news": "C456"},
+    "mastodon": {"main": "mastodon-id"}, "slack": {"general": "C123", "news": "C456",
+              "critical": {"id": "C789", "opt_in": "Only for critical news."}},
     "groupsio": {"announce": 123, "dev": 456},
 }
 CONFIG = """\
@@ -40,7 +41,10 @@ targets:
   linkedin: {main: linkedin-id}
   bluesky: {main: bluesky-id}
   mastodon: {main: mastodon-id}
-  slack: {general: C123, news: C456}
+  slack:
+    general: C123
+    news: C456
+    critical: {id: C789, opt_in: Only for critical news.}
   groupsio: {announce: 123, dev: 456}
 """
 WEBHOOK = "https://hooks.slack.com/triggers/T000/123/test"
@@ -240,6 +244,11 @@ class PlanTests(TestCase):
         items = self.plan(skip=only("slack"), content=SIMPLE)
         self.assertEqual([item["target"] for item in items], ["C123", "C456"])
 
+    def test_opt_in_destinations_only_when_included(self):
+        self.assertNotIn("critical", [item["destination"] for item in self.plan(content=SIMPLE)])
+        items = self.plan(skip=only("slack"), content="include: [slack/critical]\n" + SIMPLE)
+        self.assertEqual([item["target"] for item in items], ["C123", "C456", "C789"])
+
     def test_skipped_destinations_in_follow_ups(self):
         content = SIMPLE + ("follow_ups:\n  - publish_at: '2099-01-01T16:00:00Z'\n"
                             "    skip: [bluesky/main, linkedin]\n    text: Reminder\n")
@@ -308,15 +317,20 @@ class ConfigTests(TestCase):
             CONFIG.replace("mode: draft", "mode: send"),
             CONFIG.replace("mode: draft\n", ""),
             CONFIG + "  reddit: {main: x}\n",
-            CONFIG.replace("{general: C123, news: C456}", "{general: '#general'}"),
-            CONFIG.replace("{general: C123, news: C456}", "{General: C123}"),
-            CONFIG.replace("{general: C123, news: C456}", "{}"),
+            CONFIG.replace("general: C123", "general: '#general'"),
+            CONFIG.replace("general: C123", "General: C123"),
+            CONFIG.replace("    general: C123\n    news: C456\n    critical: {id: C789, opt_in: Only for critical news.}\n", "    {}\n"),
             CONFIG.replace("{announce: 123, dev: 456}", "{announce: '123'}"),
             CONFIG.replace("{announce: 123, dev: 456}", "{announce: 0}"),
-            CONFIG.replace("{general: C123, news: C456}", "{general: C123, news: C123}"),
-            CONFIG.replace("{general: C123, news: C456}", "{123: C123}"),  # a number, not a name
-            CONFIG.replace("{general: C123, news: C456}", '{"general\\n": C123}'),
-            CONFIG.replace("{general: C123, news: C456}", '{general: "C123\\n"}'),
+            CONFIG.replace("news: C456", "news: C123"),
+            CONFIG.replace("id: C789", "id: C123"),  # opt-in IDs are unique too
+            CONFIG.replace("general: C123", "123: C123"),  # a number, not a name
+            CONFIG.replace("general: C123", '"general\\n": C123'),
+            CONFIG.replace("general: C123", 'general: "C123\\n"'),
+            CONFIG.replace("{id: C789, opt_in: Only for critical news.}", "{id: C789}"),
+            CONFIG.replace("{id: C789, opt_in: Only for critical news.}", "{id: C789, opt_in: ' '}"),
+            CONFIG.replace("id: C789", "id: '#critical'"),
+            CONFIG.replace("opt_in: Only", "note: Only"),
             CONFIG.replace("{main: bluesky-id}", "{main: linkedin-id}"),
         ]
         for content in cases:
@@ -343,8 +357,24 @@ class DestinationTests(TestCase):
 
     def test_unknown_destination(self):
         self.assertEqual(self.messages("text: Hi\nskip: [slack/random]\n"), [
-            "skip[0]: config.yaml has no slack destination named 'random' (configured: general, news)",
+            "skip[0]: config.yaml has no slack destination named 'random' (configured: general, news, critical)",
         ])
+
+    def test_included_opt_in_destination_warns(self):
+        report = MagicMock()
+        path = self.files.write("text: Hi\ninclude: [slack/critical]\n")
+        check.check_destinations(path, check.load_yaml(path), TARGETS, report)
+        report.assert_called_once_with(
+            path, 2, "include[0]: slack/critical is opt-in: Only for critical news.", level="warning")
+
+    def test_include_errors(self):
+        self.assertEqual(self.messages("text: Hi\ninclude: [slack/news, slack/random]\n"), [
+            "include[0]: slack/news is not opt-in; it is sent to unless skipped",
+            "include[1]: config.yaml has no slack destination named 'random' (configured: general, news, critical)",
+        ])
+        for skip in ["slack", "slack/critical"]:
+            self.assertEqual(self.messages(f"text: Hi\nskip: [{skip}]\ninclude: [slack/critical]\n"),
+                             ["include[0]: slack/critical is both included and skipped"])
 
     def test_every_destination_skipped(self):
         content = "text: Hi\nskip: [bluesky, mastodon, linkedin, groupsio, slack/general, slack/news]\n"
