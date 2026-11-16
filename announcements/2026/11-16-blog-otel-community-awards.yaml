@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+subject: 'New on the OpenTelemetry blog: Announcing the 2026 OpenTelemetry Community Award Winners'
+text: |-
+  Announcing the 2026 OpenTelemetry Community Award Winners
+
+  https://opentelemetry.io/blog/2026/otel-community-awards/
