@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../../schema/announcement.schema.json
+subject: 'New on the OpenTelemetry blog: Updates to our blog policy'
+text: |-
+  Updates to our blog policy
+
+  https://opentelemetry.io/blog/2026/blog-policy-update/
