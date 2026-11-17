@@ -1,0 +1,12 @@
+image: otel-night-berlin.png
+alt: OTel Night Berlin event logo
+
+skip: [groupsio, slack]
+text: |-
+  Join us for OTel Night Berlin on 25 November. We'll explore:
+
+  - Delivery Hero's observability practices
+  - Why you should build your own Collector
+  - Centralized telemetry gateways with the OTel Collector  
+
+  Register here: https://ocgroups.dev/cncf/group/7qtkpm8/event/m3tyqd8
