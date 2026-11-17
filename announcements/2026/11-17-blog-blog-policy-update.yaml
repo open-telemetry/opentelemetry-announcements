@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=../../schema/announcement.schema.json
+image: otel-hero.png
 subject: 'New on the OpenTelemetry blog: Updates to our blog policy'
 text: |-
-  Updates to our blog policy
+  The OpenTelemetry blog is one of our most valuable communication avenues with our community. In our latest post, we outline the changes we're making to keep the blog relevant and focus our efforts where they'll have the most impact.
 
   https://opentelemetry.io/blog/2026/blog-policy-update/
