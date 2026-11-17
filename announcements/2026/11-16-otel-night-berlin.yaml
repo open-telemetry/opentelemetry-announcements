@@ -7,5 +7,6 @@ text: |-
 
   - Delivery Hero's observability practices
   - Why you should build your own Collector
+  - Centralized telemetry gateways with the OTel Collector  
 
   Register here: https://ocgroups.dev/cncf/group/7qtkpm8/event/m3tyqd8
